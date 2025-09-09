@@ -1,5 +1,5 @@
 {
     "rust-analyzer.linkedProjects": [
-        "./helloworld/Cargo.toml",
+        "./pathguard/Cargo.toml",
     ]
 }

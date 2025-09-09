@@ -1,10 +1,7 @@
 /*
 TODO
-1. Find and replace "helloworld" with your package name for **ALL FILES IN REPOSITORY**
-2. Add a flake description that describes the workspace on line 27
-3. Add a package description on line 70
-4. (optional) uncomment `nativeBuildInputs` and `buildInputs` on lines 43 and 44 if you need openssl
-5. (optional) set your project homepage, license, and maintainers list on lines 48-51
+4. (optional) uncomment `nativeBuildInputs` and `buildInputs`
+5. (optional) set your project homepage
 6. (optional) uncomment the NixOS module and update it for your needs
 7. Delete this comment block
 */
@@ -13,12 +10,12 @@ TODO
 Some utility commands:
 - `nix flake update --commit-lock-file`
 - `nix flake lock update-input <input>`
-- `nix build .#helloworld` or `nix build .`
-- `nix run .#helloworld` or `nix run .`
+- `nix build .#pathguard` or `nix build .`
+- `nix run .#pathguard` or `nix run .`
 */
 
 {
-  description = "";
+  description = "A customizable password protection system for HTTP services and file servers.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -40,9 +37,9 @@ Some utility commands:
       };
       meta = with nixpkgs.lib; {
         #homepage = "https://example.com";
-        #license = [ licenses.gpl3 ];
+        license = [ licenses.gpl3 ];
         platforms = [ system ];
-        #maintainers = with maintainers; [ ];
+        maintainers = with maintainers; [ elnudev ];
       };
     in {
       devShells.${system}.default = with pkgs; mkShell {
@@ -53,17 +50,17 @@ Some utility commands:
           cargo-edit
           bacon
         ];
-        inputsFrom = with self.packages.${system}; [ helloworld ];
+        inputsFrom = with self.packages.${system}; [ pathguard ];
       };
       packages.${system} = {
-        default = self.packages.${system}.helloworld;
-        helloworld = pkgs.rustPlatform.buildRustPackage (rustSettings // {
-          pname = "helloworld";
+        default = self.packages.${system}.pathguard;
+        pathguard = pkgs.rustPlatform.buildRustPackage (rustSettings // {
+          pname = "pathguard";
           version = "0.1.0";
-          buildAndTestSubdir = "helloworld";
+          buildAndTestSubdir = "pathguard";
           cargoHash = "sha256-+TaGIiKf+Pz2bTABeG8aCZz0/ZTCKl5398+qbas4Nvo=";
           meta = meta // {
-            description = "";
+            description = "A customizable password protection system for HTTP services and file servers.";
           };
         });
       };
@@ -71,14 +68,14 @@ Some utility commands:
       nixosModules.default = { config, ... }: let
         lib = nixpkgs.lib;
       in {
-        options.services.helloworld = {
-          enable = lib.mkEnableOption (lib.mdDoc "helloworld service");
+        options.services.pathguard = {
+          enable = lib.mkEnableOption (lib.mdDoc "pathguard service");
           package = lib.mkOption {
             type = lib.types.package;
-            default = self.packages.${system}.helloworld;
-            defaultText = "pkgs.helloworld";
+            default = self.packages.${system}.pathguard;
+            defaultText = "pkgs.pathguard";
             description = lib.mdDoc ''
-              The helloworld package that should be used.
+              The pathguard package that should be used.
             '';
           };
           port = lib.mkOption {
@@ -89,16 +86,16 @@ Some utility commands:
             '';
           };
         };
-        config.systemd.services.helloworld = let
-          cfg = config.services.helloworld;
-          pkg = self.packages.${system}.helloworld;
+        config.systemd.services.pathguard = let
+          cfg = config.services.pathguard;
+          pkg = self.packages.${system}.pathguard;
         in lib.mkIf cfg.enable {
           description = pkg.meta.description;
           after = [ "network.target" ];
           wantedBy = [ "network.target" ];
           serviceConfig = {
             ExecStart = ''
-              ${cfg.package}/bin/helloworld --port ${builtins.toString cfg.port}
+              ${cfg.package}/bin/pathguard --port ${builtins.toString cfg.port}
             '';
             Restart = "always";
             DynamicUser = true;
