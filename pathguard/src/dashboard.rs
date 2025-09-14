@@ -1,0 +1,283 @@
+use std::{
+    borrow::Cow, convert::Infallible, fmt::{Debug, Display}, future::{Ready, ready}, ops::Deref
+};
+
+use crate::{
+    Args, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, error::{Error, Result}, models::{
+        State, group::{self, DEFAULT_GROUP}, user::{
+            ADMIN_USERNAME, Authorization, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE, UnauthorizedError, UnauthorizedResponse
+        }
+    }, templates::{const_icon_button, icon_button, page}
+};
+use actix_htmx::{Htmx, SwapType};
+use actix_web::{
+    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError, cookie::Cookie, error::{ErrorBadRequest, ErrorInternalServerError, ErrorUnauthorized, InternalError}, get, http::header::{HeaderName, HeaderValue, REFERER}, web::{self, Redirect, head}
+};
+use awc::http::StatusCode;
+use clap::{builder::Str, Arg};
+use maud::{html, Markup, PreEscaped};
+use qstring;
+use secrecy::ExposeSecret;
+use serde::Deserialize;
+
+const TRASH_: &str = "trash";
+pub const TRASH: &str = TRASH_;
+
+const PLUS_: &str = "plus";
+pub const PLUS: &str = PLUS_;
+
+pub async fn dashboard(
+    req: HttpRequest,
+    session_user: SessionUser,
+    state: web::Data<State>,
+    args: web::Data<Args>,
+) -> Result<HttpResponse> {
+    if let Some(res) = session_user.authorization_admin_fancy(&state, &req, &args) {
+        return Ok(res);
+    }
+
+    Ok(HttpResponse::Ok().body(page(html! {
+        style { (PreEscaped(".box.bad:has(#error:empty) { display: none }"))}
+        .box.bad {
+            strong.titlebar { "Error" }
+            #error {}
+        }
+        span.float:right {
+            "Hello, " (ADMIN_USERNAME) " "
+            a href={(args.dashboard) (LOGOUT_ROUTE)} { "Log out" }
+        }
+        h1 { "Dashboard" }
+        h2 { "Groups" }
+        svg xmlns="http://www.w3.org/2000/svg" style="display: none" {
+            symbol #(TRASH_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />"#))
+            }
+            symbol #(PLUS_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />"#))
+            }
+        }
+        div.table.rows {
+            @for (group_name, group) in state.groups.read().or(Err(Error::InternalServer))?.iter() {
+                @let group = group.read().or(Err(Error::InternalServer))?;
+                (group.display(&args, group_name))
+            }
+            form hx-post={ (args.dashboard) (GROUPS_ROUTE) } hx-swap="beforebegin" hx-on::after-request="this.querySelector('input').value = ''" {
+                div { (const_icon_button!(PLUS, "", "ok")) }
+                input type="text" name="name" required;
+            }
+        }
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct NewGroup {
+    name: String,
+}
+
+pub async fn post_group(
+    state: web::Data<State>,
+    args: web::Data<Args>,
+    htmx: Htmx,
+    web::Form(form): web::Form<NewGroup>,
+    session_user: SessionUser,
+) -> HttpResponse {
+    if let Some(res) = session_user.authorization_admin_basic(&state) {
+        return res;
+    }
+    if let Err(err) = state.create_group(&form.name) {
+        log::error!("{err}");
+        return api_error(&htmx, err, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    let mut res = HttpResponse::Ok();
+    if htmx.is_htmx {
+        return res.body(state
+            .groups
+            .read()
+            .unwrap()
+            .get(&*form.name)
+            .unwrap()
+            .read()
+            .unwrap()
+            .display(&args, &form.name)
+            .0);
+    }
+    res.finish()
+}
+
+fn api_error<T>(htmx: &Htmx, cause: T, status: StatusCode) -> HttpResponse
+where T: Debug + Display
+{
+    if htmx.is_htmx {
+        htmx.retarget("#error".to_string());
+        htmx.reswap(SwapType::InnerHtml);
+    }
+    InternalError::new(
+        cause,
+        if htmx.is_htmx { StatusCode::OK } else { status }
+    ).error_response()
+}
+
+pub async fn delete_group(
+    htmx: Htmx,
+    state: web::Data<State>,
+    path: web::Path<String>,
+    session_user: SessionUser,
+) -> HttpResponse {
+    if let Some(res) = session_user.authorization_admin_basic(&state) {
+        return res;
+    }
+    let group_name = path.into_inner();
+    if &group_name == DEFAULT_GROUP {
+        return api_error(&htmx, "Can't delete default group", StatusCode::BAD_REQUEST);
+    }
+    if let Err(err) = state.remove_group(&group_name) {
+        log::error!("{err}");
+        return api_error(&htmx, err, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    HttpResponse::Ok().finish()
+}
+
+pub fn login_form(args: &Args, invalid: bool, return_uri: &str) -> Markup {
+    html! {
+        @let action = html! {
+            (args.dashboard) (LOGIN_ROUTE) "?r=" (return_uri)
+        };
+        form.table.rows action=(action) hx-post=(action) hx-swap="outerHTML" method="post" {
+            div {
+                label for="name" { "Username:" }
+                input type="text" name="name" required;
+            }
+            div {
+                label for="password" { "Password:" }
+                input type="password" name="password" required;
+            }
+            input type="submit" value="Log in";
+        }
+        @if invalid {
+            .bad.box {
+                strong.titlebar { "Error" }
+                p { "Incorrect username or password" }
+            }
+        }
+    }
+}
+
+fn login_page(content: Markup) -> String {
+    page(html! {
+        h1 { "Login" }
+        (content)
+    })
+}
+
+const QUERY_REDIRECT: &str = "r";
+
+pub async fn logout(
+    req: HttpRequest,
+    session_user: SessionUser,
+    args: web::Data<Args>,
+) -> impl Responder {
+    let mut res = Redirect::to(
+        req.headers()
+            .get(REFERER)
+            .map(|header| header.to_str().ok())
+            .flatten()
+            .unwrap_or(&args.dashboard)
+            .to_owned(),
+    )
+    .temporary()
+    .respond_to(&req);
+    session_user.logout(&req, &mut res);
+    res
+}
+
+#[derive(Deserialize)]
+pub struct Login {
+    name: Box<str>,
+    password: Box<str>,
+}
+
+pub async fn post_login(
+    req: HttpRequest,
+    web::Form(form): web::Form<Login>,
+    state: web::Data<State>,
+    args: web::Data<Args>,
+    return_uri: LoginReturnUri,
+) -> Result<HttpResponse> {
+    let from_htmx = req.headers().contains_key("HX-Request");
+    if state
+        .users
+        .read()
+        .or(Err(Error::InternalServer))?
+        .get(&form.name)
+        .map(|user| user.password.expose_secret() == &*form.password)
+        .unwrap_or_default()
+    {
+        let mut res = if from_htmx {
+            let mut res = HttpResponse::Ok().respond_to(&req);
+            res.headers_mut().append(
+                HeaderName::from_static("hx-redirect"),
+                HeaderValue::from_str(&return_uri).unwrap(),
+            );
+            res
+        } else {
+            Redirect::to(return_uri.deref().to_owned())
+                .see_other()
+                .respond_to(&req)
+                .map_into_boxed_body()
+        };
+        res.add_cookie(&Cookie::build(USERNAME_COOKIE, form.name.to_string()).finish())
+            .unwrap();
+        res.add_cookie(&Cookie::build(PASSWORD_COOKIE, form.password.to_string()).finish())
+            .unwrap();
+        return Ok(res);
+    }
+    // Invalid credentials
+    Ok(if from_htmx {
+        HttpResponse::Ok().body(login_form(&args, true, &return_uri).0)
+    } else {
+        HttpResponse::Unauthorized().body(login_page(login_form(&args, true, &return_uri)))
+    })
+}
+
+pub struct LoginReturnUri(Box<str>);
+
+impl Deref for LoginReturnUri {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl FromRequest for LoginReturnUri {
+    type Error = Infallible;
+
+    type Future = Ready<std::result::Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {
+        fn from_headers(req: &HttpRequest) -> Option<&str> {
+            req.headers()
+                .get(REFERER)
+                .map(|header| header.to_str().ok())
+                .flatten()
+        }
+        fn from_query(req: &HttpRequest) -> Option<String> {
+            let qstring = qstring::QString::from(req.query_string());
+            qstring.get(QUERY_REDIRECT).map(|str| str.to_owned())
+        }
+        std::future::ready(Ok(Self(
+            if req.headers().contains_key("HX-Request") {
+                from_headers(req)
+                    .map(|uri| Some(Cow::Borrowed(uri)))
+                    .unwrap_or_else(|| from_query(req).map(|uri| Cow::Owned(uri)))
+            } else {
+                from_query(req)
+                    .map(|uri| Some(Cow::Owned(uri)))
+                    .unwrap_or_else(|| from_headers(req).map(|uri| Cow::Borrowed(uri)))
+            }
+            .unwrap_or(Cow::Borrowed("/"))
+            .into_owned()
+            .into_boxed_str(),
+        )))
+    }
+}

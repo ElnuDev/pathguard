@@ -44,7 +44,7 @@ Some utility commands:
     in {
       devShells.${system}.default = with pkgs; mkShell {
         packages = [
-          (pkgs.rust-bin.stable.latest.default.override {
+          (pkgs.rust-bin.nightly.latest.default.override {
             extensions = [ "rust-src" ];
           })
           cargo-edit

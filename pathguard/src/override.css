@@ -1,0 +1,8 @@
+button, .\<button\> {
+    display: inline-flex !important;
+}
+
+.icon {
+    width: 1em;
+    aspect-ratio: 1;
+}
