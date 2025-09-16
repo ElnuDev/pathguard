@@ -1,6 +1,6 @@
 use std::{convert::Infallible, fmt::{Debug, Display}, fs, future::{self, Ready}, io, ops::Deref, path::PathBuf, sync::Mutex};
 use actix_htmx::Htmx;
-use actix_web::{FromRequest, HttpRequest, HttpResponse, HttpResponseBuilder, Responder, ResponseError, error::ErrorUnauthorized, web};
+use actix_web::{FromRequest, HttpRequest, HttpResponse, HttpResponseBuilder, Responder, ResponseError, error::{ErrorUnauthorized, InternalError}, web};
 use awc::{cookie::Cookie, http::StatusCode};
 use clap::Arg;
 use indexmap::IndexMap;
@@ -108,26 +108,32 @@ pub enum UnauthorizedError {
     BadLogin,
 }
 
-impl UnauthorizedError {
-    /// For API routes, respond with basic actix error page
-    pub fn basic_response(&self) -> HttpResponse {
-        ErrorUnauthorized(self.to_string()).error_response()
+impl ResponseError for UnauthorizedError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Self::NotLoggedIn | Self::BadLogin => StatusCode::UNAUTHORIZED,
+            Self::LoggedIn => StatusCode::FORBIDDEN,
+        }
     }
+}
 
+impl UnauthorizedError {
     /// For pages
     pub fn fancy_response(&self, req: &HttpRequest, session_user: &SessionUser) -> HttpResponse {
-        let mut res = HttpResponse::Unauthorized().body(page(match self {
-            Self::BadLogin | Self::NotLoggedIn => html!{
-                @if let Self::BadLogin = self {
-                    p { "The username or password you last signed in with have been invalidated. Please sign in again." }
-                }
+        let mut res = HttpResponse::build(self.status_code())
+        .body(page(match self {
+            Self::BadLogin => html! {
+                p { "The username or password you last signed in with have been invalidated. Please sign in again." }
+                (login_form(false, req.path()))
+            },
+            Self::NotLoggedIn => html! {
                 (login_form(false, req.path()))
             },
             Self::LoggedIn => html! {
                 span.float:right {
                     a href={ (ARGS.dashboard) (LOGOUT_ROUTE) } { "Log out" }
                 }
-                h1 { "401 Unauthorized" }
+                h1 { "403 Forbidden" }
             },
         }));
         if let Self::BadLogin = self {
@@ -156,7 +162,7 @@ impl UnauthorizedResponse for crate::error::Result<Authorization> {
     fn basic(&self) -> Option<HttpResponse> {
         Some(match self {
             Ok(Ok(())) => return None,
-            Ok(Err(unauthorized)) => unauthorized.basic_response(),
+            Ok(Err(unauthorized)) => unauthorized.error_response(),
             Err(err) => ErrorUnauthorized(err.to_string()).error_response(),
         })
     }
@@ -198,15 +204,16 @@ impl SessionUser {
         let Some(cookies) = &self.0 else {
             return Ok(Err(NotLoggedIn));
         };
-        if !state.users
+        match state.users
             .read()
             .or(Err(Error::InternalServer))?
-            .get(ADMIN_USERNAME)
-            .map(|admin| admin.password.expose_secret() == &*cookies.password)
-            .unwrap_or_default() {
-                return Ok(Err(BadLogin))
-            }
-        return Ok(Ok(()));
+            .get(&cookies.username)
+            .map(|user| user.password.expose_secret() == &*cookies.password)
+        {
+            Some(true) if &*cookies.username == ADMIN_USERNAME => Ok(Ok(())),
+            Some(true) => Ok(Err(LoggedIn)),
+            _ => Ok(Err(BadLogin)),
+        }
     }
 
     fn authorization(&self, req: &HttpRequest, state: &State) -> crate::error::Result<Authorization> {
