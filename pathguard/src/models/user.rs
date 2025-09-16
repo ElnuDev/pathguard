@@ -11,7 +11,7 @@ use secrecy::{ExposeSecret, SecretBox, SecretString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use csv;
 
-use crate::{Args, LOGOUT_ROUTE, dashboard::login_form, error::Error, models::{State, group::{self, DEFAULT_GROUP}, user}, templates::page};
+use crate::{ARGS, Args, LOGOUT_ROUTE, dashboard::login_form, error::Error, models::{State, group::{self, DEFAULT_GROUP}, user}, templates::page};
 
 pub const ADMIN_USERNAME: &str = "admin";
 pub const ADMIN_DEFAULT_PASSWORD: &str = "password";
@@ -70,7 +70,7 @@ where N: AsRef<str>, U: AsRef<User>
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer {
-        let mut s = serializer.serialize_struct("user", 2)?;
+        let mut s = serializer.serialize_struct("user", 3)?;
         s.serialize_field("name", self.name.as_ref())?;
         s.serialize_field("password", self.user.as_ref().password.expose_secret())?;
         s.serialize_field("groups", &self.user.as_ref().groups.join(User::GROUPS_SEPERATOR))?;
@@ -115,17 +115,17 @@ impl UnauthorizedError {
     }
 
     /// For pages
-    pub fn fancy_response(&self, req: &HttpRequest, args: &Args, session_user: &SessionUser) -> HttpResponse {
+    pub fn fancy_response(&self, req: &HttpRequest, session_user: &SessionUser) -> HttpResponse {
         let mut res = HttpResponse::Unauthorized().body(page(match self {
             Self::BadLogin | Self::NotLoggedIn => html!{
                 @if let Self::BadLogin = self {
                     p { "The username or password you last signed in with have been invalidated. Please sign in again." }
                 }
-                (login_form(args, false, req.path()))
+                (login_form(false, req.path()))
             },
             Self::LoggedIn => html! {
                 span.float:right {
-                    a href={ (args.dashboard) (LOGOUT_ROUTE) } { "Log out" }
+                    a href={ (ARGS.dashboard) (LOGOUT_ROUTE) } { "Log out" }
                 }
                 h1 { "401 Unauthorized" }
             },
@@ -149,7 +149,7 @@ impl Display for UnauthorizedError {
 
 pub trait UnauthorizedResponse {
     fn basic(&self) -> Option<HttpResponse>;
-    fn fancy(&self, req: &HttpRequest, args: &Args, session_user: &SessionUser) -> Option<HttpResponse>;
+    fn fancy(&self, req: &HttpRequest, session_user: &SessionUser) -> Option<HttpResponse>;
 }
 
 impl UnauthorizedResponse for crate::error::Result<Authorization> {
@@ -161,11 +161,11 @@ impl UnauthorizedResponse for crate::error::Result<Authorization> {
         })
     }
 
-    fn fancy(&self, req: &HttpRequest, args: &Args, session_user: &SessionUser) -> Option<HttpResponse> {
+    fn fancy(&self, req: &HttpRequest, session_user: &SessionUser) -> Option<HttpResponse> {
         Some({
             let mut res = match self {
                 Ok(Ok(())) => return None,
-                Ok(Err(unauthorized)) => unauthorized.fancy_response(req, args, session_user),
+                Ok(Err(unauthorized)) => unauthorized.fancy_response(req, session_user),
                 Err(err) => err.error_response(),
             };
             if req.headers().contains_key("hx-boosted") {
@@ -177,8 +177,8 @@ impl UnauthorizedResponse for crate::error::Result<Authorization> {
 }
 
 impl SessionUser {
-    pub fn authorization_admin_fancy(&self, state: &State, req: &HttpRequest, args: &Args) -> Option<HttpResponse> {
-        self.authorization_admin(state).fancy(req, args, self)
+    pub fn authorization_admin_fancy(&self, state: &State, req: &HttpRequest) -> Option<HttpResponse> {
+        self.authorization_admin(state).fancy(req, self)
     }
 
     pub fn authorization_admin_basic(&self, state: &State) -> Option<HttpResponse> {
@@ -186,7 +186,7 @@ impl SessionUser {
     }
 
     pub fn authorization_fancy(&self, state: &State, req: &HttpRequest, args: &Args) -> Option<HttpResponse> {
-        self.authorization(req, state).fancy(req, args, self)
+        self.authorization(req, state).fancy(req, self)
     }
 
     pub fn authorization_basic(&self, state: &State, req: &HttpRequest) -> Option<HttpResponse> {

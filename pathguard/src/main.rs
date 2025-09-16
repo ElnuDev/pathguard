@@ -6,7 +6,7 @@ mod templates;
 mod dashboard;
 mod error;
 
-use std::{env, fmt::format, path::PathBuf};
+use std::{env, fmt::format, mem::MaybeUninit, path::PathBuf};
 
 use actix_htmx::HtmxMiddleware;
 use actix_session::{SessionMiddleware, storage::CookieSessionStore};
@@ -17,7 +17,7 @@ use models::*;
 
 use clap::{Parser, Subcommand};
 
-use crate::{dashboard::{dashboard, delete_group, logout, post_group, post_login}, templates::page};
+use crate::{dashboard::{dashboard, delete_group, delete_rule, logout, patch_rule, post_group, post_login, post_rule}, templates::page};
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
@@ -50,6 +50,10 @@ pub struct Args {
     pub dashboard: Box<str>,
 }
 
+lazy_static::lazy_static! {
+    pub static ref ARGS: Args = Args::parse();
+}
+
 pub const LOGIN_ROUTE: &str = "/login";
 pub const LOGOUT_ROUTE: &str = "/logout";
 pub const GROUPS_ROUTE: &str = "/groups";
@@ -62,15 +66,12 @@ pub const OVERRIDE_CSS: &str = "/pathguard_override.css";
 async fn main() -> std::io::Result<()> {
     unsafe { env::set_var("RUST_LOG", "actix_web=debug,pathguard") };
     env_logger::init();
-    let args = Args::parse();
-    let port = args.port;
     // If we construct this inside of HttpServer::new
     // then it will instantiate multiple times leading to state divergence
-    let state = web::Data::new(State::load(&args).unwrap());
+    let state = web::Data::new(State::load(&ARGS).unwrap());
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
-            .app_data(web::Data::new(args.clone()))
             .wrap(middleware::Logger::default())
             .wrap(middleware::NormalizePath::trim())
             .wrap(middleware::DefaultHeaders::new().add((CONTENT_TYPE, TEXT_HTML_UTF_8)))
@@ -79,17 +80,23 @@ async fn main() -> std::io::Result<()> {
                 Key::from(&[0; 64]),
             ).cookie_secure(false).build())
             .wrap(HtmxMiddleware)
-            .service(web::resource(&*args.dashboard).get(dashboard))
-            .service(web::resource(args.dashboard.to_string() + LOGIN_ROUTE).post(post_login))
-            .service(web::resource(args.dashboard.to_string() + LOGOUT_ROUTE).get(logout))
-            .service(web::resource(args.dashboard.to_string() + GROUPS_ROUTE)
+            .service(web::resource(&*ARGS.dashboard).get(dashboard))
+            .service(web::resource(ARGS.dashboard.to_string() + LOGIN_ROUTE)
+                .post(post_login))
+            .service(web::resource(ARGS.dashboard.to_string() + LOGOUT_ROUTE)
+                .get(logout))
+            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE)
                 .post(post_group))
-            .service(web::resource(args.dashboard.to_string() + GROUPS_ROUTE + "/{group}")
+            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}")
+                .post(post_rule)
                 .delete(delete_group))
-            .service(web::resource(args.dashboard.to_string() + "/{tail:.*}").get(async |args: web::Data<Args>|
+            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/{rule}")
+                .patch(patch_rule)
+                .delete(delete_rule))
+            .service(web::resource(ARGS.dashboard.to_string() + "/{tail:.*}").get(async ||
                 HttpResponse::NotFound().body(page(html! {
                     h1 { "404 Not Found" }
-                    p { "Couldn't find that page. Would you like to return to the " a href=(args.dashboard) { "dashboard" } "?" }
+                    p { "Couldn't find that page. Would you like to return to the " a href=(ARGS.dashboard) { "dashboard" } "?" }
                 }))
             ))
             .service(web::resource(HTMX).get(async || {
@@ -110,7 +117,7 @@ async fn main() -> std::io::Result<()> {
             .default_service(web::to(proxy::proxy))
     })
         .disable_signals()
-        .bind(("127.0.0.1", port))?
+        .bind(("127.0.0.1", ARGS.port))?
         .run()
         .await?;
     Ok(())

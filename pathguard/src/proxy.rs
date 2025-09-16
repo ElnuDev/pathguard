@@ -8,7 +8,6 @@ use crate::{Args, templates::page, error::Error};
 pub async fn proxy(
     req: HttpRequest,
     body: web::Bytes,
-    args: web::Data<Args>,
 ) -> Result<HttpResponse, Error> {
     // We want to pass redirect headers to the client, not follow them ourselves
     let client = Client::builder().disable_redirects().finish();

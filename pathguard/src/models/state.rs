@@ -1,5 +1,5 @@
 use std::{f32::consts::E, fs::{self, File}, io, ops::Deref, path::PathBuf, sync::{Mutex, RwLock, RwLockReadGuard}};
-use actix_web::mime::CSV;
+use actix_web::{ResponseError, mime::CSV, http::StatusCode};
 use clap::builder::Str;
 use indexmap::IndexMap;
 use thiserror::Error;
@@ -36,6 +36,12 @@ pub enum UpdateStateError {
     Poison,
 }
 
+impl ResponseError for UpdateStateError {
+    fn status_code(&self) -> StatusCode {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum AddGroupError {
     #[error("{0}")]
@@ -46,12 +52,31 @@ pub enum AddGroupError {
     BadGroupName,
 }
 
+impl ResponseError for AddGroupError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Self::UpdateState(err) => err.status_code(),
+            Self::AlreadyExists => StatusCode::CONFLICT,
+            Self::BadGroupName => StatusCode::UNPROCESSABLE_ENTITY,
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum UpdateGroupError {
     #[error("{0}")]
     UpdateState(#[from] UpdateStateError),
     #[error("That group doesn't exist")]
     DoesNotExist,
+}
+
+impl ResponseError for UpdateGroupError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Self::UpdateState(err) => err.status_code(),
+            Self::DoesNotExist => StatusCode::UNPROCESSABLE_ENTITY,
+        }
+    }
 }
 
 const CSV_EXTENSION: &str = ".csv";
@@ -90,19 +115,17 @@ impl State {
                 let mut reader = csv::Reader::from_path(entry.path())?;
                 let group_name = file_name_lossy[..file_name_lossy.len() - CSV_EXTENSION.len()].to_string();
                 groups.insert(group_name, RwLock::new(Group(reader
-                    .deserialize::<Rule>()
-                    .collect::<Result<Vec<Rule>, csv::Error>>()?)));
+                    .deserialize::<(String, Rule)>()
+                    .collect::<Result<IndexMap<String, Rule>, csv::Error>>()?)));
             }
         } else {
             fs::create_dir(groups_dir)?;
             let default_group = Group::default();
-            let mut writer = csv::Writer::from_path({
+            default_group.write(&{
                 let mut path = groups_dir.clone();
                 path.push(format!("{DEFAULT_GROUP}{CSV_EXTENSION}"));
                 path
             })?;
-            writer.serialize(&default_group)?;
-            writer.flush()?;
         }
 
         Ok(Self {

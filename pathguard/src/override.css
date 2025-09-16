@@ -6,3 +6,70 @@ button, .\<button\> {
     width: 1em;
     aspect-ratio: 1;
 }
+
+.rule {
+    --size: 1.5em;
+    --on-bg: var(--ok-bg);
+    --on-fg: var(--ok-fg);
+    --off-bg: var(--bad-bg);
+    --off-fg: var(--bad-fg);
+    --fg: white;
+    display: inline-flex !important;
+    height: var(--size);
+    border-radius: var(--size);
+    overflow: hidden;
+    position: relative;
+    outline: 2px solid var(--fg);
+    transition: 0.25s;
+}
+
+.rule::after {
+    content: "";
+    width: var(--size);
+    height: var(--size);
+    background: var(--fg);
+    position: absolute;
+    border-radius: 100%;
+    pointer-events: none;
+    transform: translateX(var(--translate, var(--size)))  scale(0.75);
+    transition: 0.25s;
+}
+
+.rule input {
+    display: none !important;
+}
+
+.rule label {
+    width: var(--size);
+}
+
+.rule label:hover {
+    background: #ffffff77;
+}
+
+.rule:has(input[value="off"]:checked) {
+    background: var(--off-bg);
+    --fg: var(--off-fg);
+}
+
+.rule:has(input[value="off"]:checked)::after {
+    --translate: 0;
+}
+
+.rule:has(input[value="na"]:checked) {
+    background: transparent;
+    opacity: 0.5;
+}
+
+.rule:has(input[value="na"]:checked)::after {
+    --translate: var(--size);
+}
+
+.rule:has(input[value="on"]:checked) {
+    background: var(--on-bg);
+    --fg: var(--on-fg);
+}
+
+.rule:has(input[value="on"]:checked)::after {
+    --translate: calc(2 * var(--size));
+}

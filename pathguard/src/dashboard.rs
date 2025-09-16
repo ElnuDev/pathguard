@@ -1,24 +1,25 @@
 use std::{
-    borrow::Cow, convert::Infallible, fmt::{Debug, Display}, future::{Ready, ready}, ops::Deref
+    borrow::Cow, convert::Infallible, fmt::{Debug, Display}, future::Ready, ops::Deref
 };
 
 use crate::{
-    Args, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, error::{Error, Result}, models::{
-        State, group::{self, DEFAULT_GROUP}, user::{
-            ADMIN_USERNAME, Authorization, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE, UnauthorizedError, UnauthorizedResponse
+    ARGS, Args, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, error::{self, Error}, models::{
+        Group, State, group::{self, DEFAULT_GROUP, RULE_NA, RULE_ON, Rule}, state::{AddGroupError, UpdateGroupError, UpdateStateError}, user::{
+            ADMIN_USERNAME, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE
         }
-    }, templates::{const_icon_button, icon_button, page}
+    }, templates::{const_icon_button, page}
 };
 use actix_htmx::{Htmx, SwapType};
 use actix_web::{
-    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError, cookie::Cookie, error::{ErrorBadRequest, ErrorInternalServerError, ErrorUnauthorized, InternalError}, get, http::header::{HeaderName, HeaderValue, REFERER}, web::{self, Redirect, head}
+    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError, cookie::Cookie, dev::Url, error::{ErrorBadRequest, ErrorInternalServerError, ErrorNotFound, ErrorUnauthorized, InternalError}, get, http::header::{HeaderName, HeaderValue, REFERER}, web::{self, Redirect, head}
 };
-use awc::http::StatusCode;
-use clap::{builder::Str, Arg};
+use awc::{cookie::time::format_description::modifier::WeekNumberRepr, http::StatusCode};
+use clap::builder::Str;
 use maud::{html, Markup, PreEscaped};
 use qstring;
 use secrecy::ExposeSecret;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use thiserror::Error;
 
 const TRASH_: &str = "trash";
 pub const TRASH: &str = TRASH_;
@@ -30,9 +31,8 @@ pub async fn dashboard(
     req: HttpRequest,
     session_user: SessionUser,
     state: web::Data<State>,
-    args: web::Data<Args>,
-) -> Result<HttpResponse> {
-    if let Some(res) = session_user.authorization_admin_fancy(&state, &req, &args) {
+) -> Result<HttpResponse, Error> {
+    if let Some(res) = session_user.authorization_admin_fancy(&state, &req) {
         return Ok(res);
     }
 
@@ -44,7 +44,7 @@ pub async fn dashboard(
         }
         span.float:right {
             "Hello, " (ADMIN_USERNAME) " "
-            a href={(args.dashboard) (LOGOUT_ROUTE)} { "Log out" }
+            a href={(ARGS.dashboard) (LOGOUT_ROUTE)} { "Log out" }
         }
         h1 { "Dashboard" }
         h2 { "Groups" }
@@ -59,14 +59,143 @@ pub async fn dashboard(
         div.table.rows {
             @for (group_name, group) in state.groups.read().or(Err(Error::InternalServer))?.iter() {
                 @let group = group.read().or(Err(Error::InternalServer))?;
-                (group.display(&args, group_name))
+                (group.display(group_name))
             }
-            form hx-post={ (args.dashboard) (GROUPS_ROUTE) } hx-swap="beforebegin" hx-on::after-request="this.querySelector('input').value = ''" {
+            form hx-post={ (ARGS.dashboard) (GROUPS_ROUTE) } hx-swap="beforebegin" hx-on::after-request="this.querySelector('input').value = ''" {
                 div { (const_icon_button!(PLUS, "", "ok")) }
                 input type="text" name="name" required;
             }
         }
     })))
+}
+
+#[derive(Deserialize)]
+pub struct NewRule {
+    name: String,
+}
+
+#[derive(Error, Debug)]
+pub enum AddRuleError {
+    #[error("{0}")]
+    UpdateGroup(#[from] UpdateGroupError),
+    #[error("That rule already exists")]
+    AlreadyExists,
+}
+
+impl ResponseError for AddRuleError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Self::UpdateGroup(err) => err.status_code(),
+            Self::AlreadyExists => StatusCode::CONFLICT,
+        }
+    }
+}
+
+pub async fn post_rule(
+    state: web::Data<State>,
+    path: web::Path<String>,
+    htmx: Htmx,
+    web::Form(NewRule { name }): web::Form<NewRule>,
+    session_user: SessionUser,
+) -> Result<HttpResponse, AddRuleError> {
+    if let Some(res) = session_user.authorization_admin_basic(&state) {
+        return Ok(res);
+    }
+    let group_name = path.into_inner();
+    let body = htmx.is_htmx
+        .then(|| Group::display_rule(&group_name, &name, &Default::default()).0);
+    state.update_group(&group_name, |group| {
+        if group.contains_key(&name) {
+            return Err(AddRuleError::AlreadyExists);
+        }
+        group.insert(name, None);
+        Ok(())
+    })??;
+    Ok({
+        let mut res = HttpResponse::Ok();
+        if let Some(body) = body {
+            res.body(body)
+        } else {
+            res.finish()
+        }
+    })
+}
+
+#[derive(Error, Debug)]
+pub enum UpdateRuleError{
+    #[error("{0}")]
+    UpdateGroup(#[from] UpdateGroupError),
+    #[error("That rule doesn't exist")]
+    RuleDoesNotExist,
+}
+
+impl ResponseError for UpdateRuleError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Self::UpdateGroup(err) => err.status_code(),
+            Self::RuleDoesNotExist => StatusCode::NOT_FOUND,
+        }
+    }
+}
+
+pub async fn delete_rule(
+    state: web::Data<State>,
+    path: web::Path<(String, String)>,
+    session_user: SessionUser,
+) -> Result<HttpResponse, UpdateRuleError> {
+    if let Some(res) = session_user.authorization_admin_basic(&state) {
+        return Ok(res);
+    }
+
+    let (group_name, path) = path.into_inner();
+    let path = urlencoding::decode(&path).unwrap_or(Cow::Borrowed(&path));
+
+    state.update_group(&group_name, |group| {
+        if group.shift_remove(&*path).is_none() {
+            return Err(UpdateRuleError::RuleDoesNotExist);
+        };
+        Ok(())
+    })??;
+    Ok(HttpResponse::Ok().finish())
+}
+
+#[derive(Deserialize)]
+pub struct PatchRule {
+    #[serde(deserialize_with = "deserialize_rule")]
+    rule: Rule,
+}
+
+fn deserialize_rule<'de, D>(deserializer: D) -> Result<Rule, D::Error>
+where D: Deserializer<'de> {
+    Ok(match String::deserialize(deserializer)?.as_str() {
+        group::RULE_OFF => Some(false),
+        group::RULE_NA => None,
+        group::RULE_ON => Some(true),
+        _ => return Err(serde::de::Error::custom("rule must be off, na, or no")),
+    })
+}
+
+pub async fn patch_rule(
+    state: web::Data<State>,
+    path: web::Path<(String, String)>,
+    web::Form(form): web::Form<PatchRule>,
+    session_user: SessionUser,
+) -> Result<HttpResponse, UpdateRuleError> {
+    if let Some(res) = session_user.authorization_admin_basic(&state) {
+        return Ok(res);
+    }
+
+    let (group_name, path) = path.into_inner();
+    let path = urlencoding::decode(&path).unwrap_or(Cow::Borrowed(&path));
+
+    state.update_group(&group_name, |group| {
+        let Some(rule) = group.get_mut(&*path) else {
+            return Err(UpdateRuleError::RuleDoesNotExist);
+        };
+        *rule = form.rule;
+        Ok(())
+    })??;
+    Ok(HttpResponse::Ok().finish())
 }
 
 #[derive(Deserialize)]
@@ -76,32 +205,31 @@ pub struct NewGroup {
 
 pub async fn post_group(
     state: web::Data<State>,
-    args: web::Data<Args>,
     htmx: Htmx,
     web::Form(form): web::Form<NewGroup>,
     session_user: SessionUser,
-) -> HttpResponse {
+) -> Result<HttpResponse, AddGroupError> {
     if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return res;
+        return Ok(res);
     }
-    if let Err(err) = state.create_group(&form.name) {
-        log::error!("{err}");
-        return api_error(&htmx, err, StatusCode::INTERNAL_SERVER_ERROR);
-    }
-    let mut res = HttpResponse::Ok();
-    if htmx.is_htmx {
-        return res.body(state
-            .groups
-            .read()
-            .unwrap()
-            .get(&*form.name)
-            .unwrap()
-            .read()
-            .unwrap()
-            .display(&args, &form.name)
-            .0);
-    }
-    res.finish()
+    state.create_group(&form.name)?;
+    Ok({
+        let mut res = HttpResponse::Ok();
+        if htmx.is_htmx {
+            res.body(state
+                .groups
+                .read()
+                .unwrap()
+                .get(&*form.name)
+                .unwrap()
+                .read()
+                .unwrap()
+                .display(&form.name)
+                .0)
+        } else {
+            res.finish()
+        }
+    })
 }
 
 fn api_error<T>(htmx: &Htmx, cause: T, status: StatusCode) -> HttpResponse
@@ -137,10 +265,10 @@ pub async fn delete_group(
     HttpResponse::Ok().finish()
 }
 
-pub fn login_form(args: &Args, invalid: bool, return_uri: &str) -> Markup {
+pub fn login_form(invalid: bool, return_uri: &str) -> Markup {
     html! {
         @let action = html! {
-            (args.dashboard) (LOGIN_ROUTE) "?r=" (return_uri)
+            (ARGS.dashboard) (LOGIN_ROUTE) "?r=" (return_uri)
         };
         form.table.rows action=(action) hx-post=(action) hx-swap="outerHTML" method="post" {
             div {
@@ -174,14 +302,13 @@ const QUERY_REDIRECT: &str = "r";
 pub async fn logout(
     req: HttpRequest,
     session_user: SessionUser,
-    args: web::Data<Args>,
 ) -> impl Responder {
     let mut res = Redirect::to(
         req.headers()
             .get(REFERER)
             .map(|header| header.to_str().ok())
             .flatten()
-            .unwrap_or(&args.dashboard)
+            .unwrap_or(&ARGS.dashboard)
             .to_owned(),
     )
     .temporary()
@@ -200,9 +327,8 @@ pub async fn post_login(
     req: HttpRequest,
     web::Form(form): web::Form<Login>,
     state: web::Data<State>,
-    args: web::Data<Args>,
     return_uri: LoginReturnUri,
-) -> Result<HttpResponse> {
+) -> Result<HttpResponse, Error> {
     let from_htmx = req.headers().contains_key("HX-Request");
     if state
         .users
@@ -233,9 +359,9 @@ pub async fn post_login(
     }
     // Invalid credentials
     Ok(if from_htmx {
-        HttpResponse::Ok().body(login_form(&args, true, &return_uri).0)
+        HttpResponse::Ok().body(login_form(true, &return_uri).0)
     } else {
-        HttpResponse::Unauthorized().body(login_page(login_form(&args, true, &return_uri)))
+        HttpResponse::Unauthorized().body(login_page(login_form(true, &return_uri)))
     })
 }
 
