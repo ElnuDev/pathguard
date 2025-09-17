@@ -1,11 +1,11 @@
 use std::{
-    borrow::Cow, convert::Infallible, fmt::{Debug, Display}, future::Ready, ops::Deref
+    borrow::Cow, convert::Infallible, fmt::{Debug, Display}, future::Ready, ops::Deref, sync::RwLock
 };
 
 use crate::{
-    ARGS, Args, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE, error::{self, Error}, models::{
+    ARGS, Args, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE, error::{self, BasicError, Error}, models::{
         Group, State, User, group::{self, DEFAULT_GROUP, RULE_NA, RULE_ON, Rule}, state::{AddGroupError, UpdateGroupError, UpdateStateError}, user::{
-            ADMIN_USERNAME, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE, UserValidationError
+            self, ADMIN_USERNAME, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE, UserValidationError
         }
     }, templates::{const_icon_button, fancy_page, page}
 };
@@ -15,7 +15,7 @@ use actix_web::{
 };
 use awc::{cookie::time::format_description::modifier::WeekNumberRepr, http::StatusCode};
 use clap::builder::Str;
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use maud::{html, Markup, PreEscaped};
 use qstring;
 use secrecy::{ExposeSecret, SecretString};
@@ -62,8 +62,9 @@ pub async fn dashboard(
         }
         h1 { "Dashboard" }
         h2 #groups { "Groups" }
+        @let groups = state.groups.read().or(Err(Error::InternalServer))?;
         .table.rows {
-            @for (group_name, group) in state.groups.read().or(Err(Error::InternalServer))?.iter() {
+            @for (group_name, group) in groups.iter() {
                 @let group = group.read().or(Err(Error::InternalServer))?;
                 (group.display(group_name))
             }
@@ -78,12 +79,16 @@ pub async fn dashboard(
             @for (user_name, user) in state.users.read().or(Err(Error::InternalServer))?.iter() {
                 (user.display(user_name))
             }
-            (new_user_form(false))
+            (new_user_form_ok(false, &groups))
         }
     })))
 }
 
-fn new_user_form(autofocus: bool) -> Markup {
+fn new_user_form_ok(autofocus: bool, groups: &IndexMap<String, RwLock<Group>>) -> Markup {
+    new_user_form(autofocus, Result::<&IndexMap<String, RwLock<Group>>, Infallible>::Ok(groups))
+}
+
+fn new_user_form<E: Display>(autofocus: bool, groups: Result<impl Deref<Target = IndexMap<String, RwLock<Group>>>, E>) -> Markup {
     html! {
         form
             autocomplete="off"
@@ -98,13 +103,76 @@ fn new_user_form(autofocus: bool) -> Markup {
                     div {
                         details.inline {
                             summary { "Groups" }
-                            select name="groups" multiple {
-                                option value="foo" { "Foo" }
-                                option value="bar" { "Bar" }
-                                option value="baz" { "Baz" }
-                            }
+                            (groups_select(groups, None))
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+pub async fn get_groups(state: web::Data<State>, session_user: SessionUser) -> Result<HttpResponse, BasicError> {
+    if let Some(res) = session_user.authorization_admin_basic(&state) {
+        return Ok(res);
+    }
+    Ok(HttpResponse::Ok().body(groups_select(state.groups.read(), None).0))
+}
+
+pub async fn get_user_groups(
+    state: web::Data<State>,
+    path: web::Path<String>,
+    session_user: SessionUser
+) -> Result<HttpResponse, Error> {
+    if let Some(res) = session_user.authorization_admin_basic(&state) {
+        return Ok(res);
+    }
+    let user_name = path.into_inner();
+    let lock = state.users.read().or(Err(Error::InternalServer))?;
+    let Some(user) = lock.get(&*user_name) else {
+        return Ok(HttpResponse::NotFound().finish());
+    };
+    Ok(HttpResponse::Ok().body(user_groups(&user_name, user).0))
+}
+
+pub fn user_groups(name: &str, user: &User) -> Markup {
+    html! {
+        dd hx-trigger="groupsDeleted from:body" hx-swap="outerHTML" hx-get={ (ARGS.dashboard) (USERS_ROUTE) "/" (name) "/groups" } {
+            @if user.groups.is_empty() { em { "None" } } @else {
+                @for (i, group_name) in user.groups.iter().enumerate() {
+                    @if i != 0 { ", " }
+                    a href={ "#" (Group::id(group_name)) } { (group_name)};
+                }
+            }
+        }
+    }
+}
+
+fn groups_select_ok(groups: &IndexMap<String, RwLock<Group>>, user: Option<&User>) -> Markup {
+    groups_select(Result::<&IndexMap<String, RwLock<Group>>, Infallible>::Ok(groups), user)
+}
+
+fn groups_select<E: Display>(groups: Result<impl Deref<Target = IndexMap<String, RwLock<Group>>>, E>, user: Option<&User>) -> Markup {
+    match groups {
+        Ok(groups) => html! {
+            select hx-trigger="groups from:body" hx-get={ (ARGS.dashboard) (GROUPS_ROUTE) } name="groups" multiple {
+                @for group_name in groups.keys() {
+                    @if group_name != DEFAULT_GROUP {
+                        option
+                            value=(group_name)
+                            selected[user
+                                .map(|user| user.groups.contains(group_name.deref()))
+                                .unwrap_or_default()]
+                        { (group_name) }
+                    }
+                }
+            }
+        },
+        Err(err) => {
+            log::error!("{err}");
+            html! {
+                div hx-trigger="groups from:body" {
+                    "Something went wrong fetching group list."
                 }
             }
         }
@@ -166,7 +234,7 @@ pub async fn post_user(
         let res = if htmx.is_htmx {
             res.body(html! {
                 (user.display(&name))
-                (new_user_form(true))
+                (new_user_form(true, state.groups.read()))
             }.0)
         } else {
             res.finish()
@@ -325,6 +393,15 @@ pub struct NewGroup {
     name: String,
 }
 
+fn refetch_groups(htmx: &Htmx) {
+    htmx.trigger_event("groups".to_string(), None, Some(actix_htmx::TriggerType::AfterSwap));
+}
+
+fn refetch_groups_deleted(htmx: &Htmx) {
+    refetch_groups(htmx);
+    htmx.trigger_event("groupsDeleted".to_string(), None, Some(actix_htmx::TriggerType::AfterSwap));
+}
+
 pub async fn post_group(
     state: web::Data<State>,
     htmx: Htmx,
@@ -338,6 +415,7 @@ pub async fn post_group(
     Ok({
         let mut res = HttpResponse::Ok();
         if htmx.is_htmx {
+            refetch_groups(&htmx);
             res.body(state
                 .groups
                 .read()
@@ -383,6 +461,9 @@ pub async fn delete_group(
     if let Err(err) = state.remove_group(&group_name) {
         log::error!("{err}");
         return api_error(&htmx, err, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    if htmx.is_htmx {
+        refetch_groups_deleted(&htmx);
     }
     HttpResponse::Ok().finish()
 }

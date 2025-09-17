@@ -1,3 +1,5 @@
+use std::{fmt::Display, ops::{Deref, DerefMut}};
+
 use actix_web::{HttpResponse, ResponseError, body::BoxBody, http::{StatusCode, header::ContentType}};
 use awc::error::SendRequestError;
 use maud::html;
@@ -34,5 +36,40 @@ impl ResponseError for Error {
                 h1 { (status_code) }
                 p { (self) }
             }))
+    }
+}
+
+#[derive(Debug)]
+pub struct BasicError(pub Error);
+
+impl Deref for BasicError {
+    type Target = Error;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for BasicError {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Display for BasicError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl ResponseError for BasicError {
+    fn status_code(&self) -> StatusCode {
+        self.0.status_code()
+    }
+}
+
+impl From<Error> for BasicError {
+    fn from(value: Error) -> Self {
+        Self(value)
     }
 }

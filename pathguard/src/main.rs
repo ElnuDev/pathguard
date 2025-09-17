@@ -18,7 +18,7 @@ use models::*;
 use clap::{Parser, Subcommand};
 use passwords::PasswordGenerator;
 
-use crate::{dashboard::{dashboard, delete_group, delete_rule, delete_user, logout, patch_rule, post_group, post_login, post_rule, post_user}, templates::page};
+use crate::{dashboard::{dashboard, delete_group, delete_rule, delete_user, get_groups, get_user_groups, logout, patch_rule, post_group, post_login, post_rule, post_user}, templates::page};
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
@@ -96,6 +96,7 @@ async fn main() -> std::io::Result<()> {
             .service(web::resource(ARGS.dashboard.to_string() + LOGOUT_ROUTE)
                 .get(logout))
             .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE)
+                .get(get_groups)
                 .post(post_group))
             .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}")
                 .post(post_rule)
@@ -107,6 +108,8 @@ async fn main() -> std::io::Result<()> {
                 .post(post_user))
             .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}")
                 .delete(delete_user))
+            .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}/groups")
+                .get(get_user_groups))
             .service(web::resource(ARGS.dashboard.to_string() + "/{tail:.*}").get(async ||
                 HttpResponse::NotFound().body(page(html! {
                     h1 { "404 Not Found" }

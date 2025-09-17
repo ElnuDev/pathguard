@@ -207,6 +207,11 @@ impl State {
             .write()
             .or(Err(UpdateStateError::Poison))?
             .shift_remove(group_name);
+        self.update_users(|users| {
+            for user in users.values_mut() {
+                user.groups.shift_remove(group_name);
+            }
+        })?;
         fs::remove_file({
             let mut path = self.groups_dir.clone();
             path.push(format!("{group_name}{CSV_EXTENSION}"));

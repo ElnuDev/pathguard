@@ -12,7 +12,7 @@ use secrecy::{ExposeSecret, SecretBox, SecretString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use csv;
 
-use crate::{ARGS, Args, LOGOUT_ROUTE, dashboard::{TRASH, login_form}, error::Error, models::{Group, State, group::{self, DEFAULT_GROUP}, user}, templates::{icon_button, page}};
+use crate::{ARGS, Args, LOGOUT_ROUTE, dashboard::{TRASH, login_form, user_groups}, error::Error, models::{Group, State, group::{self, DEFAULT_GROUP}, user}, templates::{icon_button, page}};
 
 pub const ADMIN_USERNAME: &str = "admin";
 pub const ADMIN_DEFAULT_PASSWORD: &str = "password";
@@ -35,12 +35,14 @@ pub enum UserValidationError {
     CommonPassword(Box<str>),
     #[error("group \"{0}\" doesn't exist")]
     GroupDoesNotExist(Box<str>),
+    #[error("default group is redundant")]
+    DefaultGroup,
 }
 
 impl ResponseError for UserValidationError {
     fn status_code(&self) -> StatusCode {
         match self {
-            Self::WeakPassword { .. } | Self::CommonPassword(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::WeakPassword { .. } | Self::CommonPassword(_) | Self::DefaultGroup => StatusCode::UNPROCESSABLE_ENTITY,
             Self::GroupDoesNotExist { .. } => StatusCode::CONFLICT,
         }
     }
@@ -75,6 +77,14 @@ impl User {
             return Err(WeakPassword { strength, min: ARGS.min_password_strength });
         }
 
+        for group in &self.groups {
+            if group.deref() == DEFAULT_GROUP {
+                return Err(DefaultGroup);
+            }
+            if !global_groups.contains_key(group.as_ref()) {
+                return Err(GroupDoesNotExist(group.clone()));
+            }
+        }
         if let Some(group) = self.groups
             .iter()
             .filter(|group| !global_groups.contains_key(group.as_ref()))
@@ -110,7 +120,7 @@ impl User {
                             @if name != ADMIN_USERNAME {
                                 div {
                                     dt { "Groups:" }
-                                    dd { "TODO" }
+                                    (user_groups(name, self))
                                 }
                             }
                             div {
@@ -149,7 +159,11 @@ where
     D: Deserializer<'de>
 {
     let s: String = Deserialize::deserialize(deserializer)?;
-    Ok(s
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Ok(IndexSet::new());
+    }
+    Ok(trimmed
         .split(User::GROUPS_SEPERATOR)
         .map(|str| str.to_owned().into_boxed_str())
         .collect())

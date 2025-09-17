@@ -81,6 +81,10 @@ impl Group {
         Ok(())
     }
 
+    pub fn id(name: &str) -> String {
+        "group-".to_string() + &urlencoding::encode(name)
+    }
+
     pub fn display(&self, name: &str) -> Markup {
         html! {
             div {
@@ -93,7 +97,7 @@ impl Group {
                         ))
                     }
                 }
-                .bold { (name) }
+                h3 #(Self::id(name)) { (name) }
                 .table.rows {
                     @for (path_root, rule) in &self.0 {
                         (Self::display_rule(name, path_root, rule))
@@ -118,7 +122,7 @@ impl Group {
                 div {
                     (icon_button(
                         TRASH,
-                        &format!("hx-delete=\"{dashboard}/groups/{group_name}/{path_encoded}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\"",
+                        &format!("hx-delete=\"{dashboard}/groups/{group_name}/{path_encoded}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\" hx-confirm=\"Are you sure you want to delete this rule?\"",
                             dashboard=ARGS.dashboard),
                         Some("bad")
                     ))
