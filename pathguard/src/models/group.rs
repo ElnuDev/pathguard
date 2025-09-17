@@ -118,7 +118,7 @@ impl Group {
                 div {
                     (icon_button(
                         TRASH,
-                        &format!("hx-delete=\"{dashboard}/groups/{group_name}/{path_encoded}\" hx-target=\"closest .table.rows > div\"",
+                        &format!("hx-delete=\"{dashboard}/groups/{group_name}/{path_encoded}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\"",
                             dashboard=ARGS.dashboard),
                         Some("bad")
                     ))
