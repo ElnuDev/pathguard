@@ -29,8 +29,6 @@ pub struct User {
 
 #[derive(Error, Debug)]
 pub enum UserValidationError {
-    #[error("username must be URL-safe, name \"{unencoded}\" must be written as {encoded} in URL")]
-    NameNotUrlSafe { unencoded: String, encoded: String },
     #[error("password strength must be at least {min}/100, provided password strength was only {strength:.1}")]
     WeakPassword { strength: f64, min: f64 },
     #[error("\"{0}\" is a common password and shouldn't be used")]
@@ -42,7 +40,7 @@ pub enum UserValidationError {
 impl ResponseError for UserValidationError {
     fn status_code(&self) -> StatusCode {
         match self {
-            Self::NameNotUrlSafe { .. } | Self::WeakPassword { .. } | Self::CommonPassword(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::WeakPassword { .. } | Self::CommonPassword(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::GroupDoesNotExist { .. } => StatusCode::CONFLICT,
         }
     }
@@ -64,12 +62,8 @@ impl User {
         }
     }
 
-    pub fn validate(&self, name: &str, global_groups: &IndexMap<String, RwLock<Group>>) -> Result<(), UserValidationError> {
+    pub fn validate(&self, global_groups: &IndexMap<String, RwLock<Group>>) -> Result<(), UserValidationError> {
         use UserValidationError::*;
-
-        if let Cow::Owned(encoded) = urlencoding::encode(name) {
-            return Err(NameNotUrlSafe { unencoded: name.to_owned(), encoded });
-        }
 
         let analyzed = passwords::analyzer::analyze(self.password.expose_secret());
         if analyzed.is_common() {
@@ -95,11 +89,12 @@ impl User {
     pub fn display(&self, name: &str) -> Markup {
         html! {
             div {
+                @let name_encoded = urlencoding::encode(name);
                 div {
                     @if name != ADMIN_USERNAME {
                         (icon_button(
                             TRASH,
-                            &format!("hx-delete=\"{dashboard}/users/{name}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\" hx-confirm=\"Are you sure you want to delete this user?\"", dashboard=ARGS.dashboard),
+                            &format!("hx-delete=\"{dashboard}/users/{name_encoded}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\" hx-confirm=\"Are you sure you want to delete this user?\"", dashboard=ARGS.dashboard),
                             Some("bad")
                         ))
                     }

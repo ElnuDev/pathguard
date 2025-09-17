@@ -161,7 +161,7 @@ pub async fn post_user(
         if users.contains_key(&name) {
             return Err(AlreadyExists);
         }
-        user.validate(&name, &*state.groups.read().or(Err(UpdateState(UpdateStateError::Poison)))?)?;
+        user.validate(&*state.groups.read().or(Err(UpdateState(UpdateStateError::Poison)))?)?;
         let mut res = HttpResponse::Ok();
         let res = if htmx.is_htmx {
             res.body(html! {
