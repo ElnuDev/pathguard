@@ -2,6 +2,15 @@ let modal;
 let modalTitleBar;
 let modalMessageContainer;
 let modalOkButton;
+let shiftPressed = false;
+
+function toggleShift(pressed) {
+    shiftPressed = pressed;
+    document.body.classList.toggle("shift", shiftPressed);
+}
+
+document.addEventListener("keydown", event => { if (event.key === "Shift") toggleShift(true) });
+document.addEventListener("keyup", event => { if (event.key === "Shift") toggleShift(false) });
 
 function makeModal() {
     if (typeof modal !== "undefined") {
@@ -38,6 +47,10 @@ document.addEventListener("DOMContentLoaded", _event => {
     document.addEventListener("htmx:confirm", event => {
         if (!event.detail.question) return;
         event.preventDefault();
+        if (shiftPressed) {
+            event.detail.issueRequest(true);
+            return;
+        }
         makeModal();
         modalTitleBar.innerHTML = "Confirmation";
         modal.classList.toggle("bad", false);

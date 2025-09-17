@@ -131,3 +131,7 @@ details.inline > :not(summary) {
     border-spacing: var(--gap);
     margin: calc(-1 * var(--gap));
 }
+
+body.shift .iconbutton.bad:hover {
+    --accent: red;
+}
