@@ -184,7 +184,7 @@ where N: AsRef<str>, U: AsRef<User>
             s
         })?;
         s.serialize_field("created", &self.user.as_ref().created)?;
-        s.serialize_field("last_active", &self.user.as_ref().created)?;
+        s.serialize_field("last_active", &self.user.as_ref().last_active)?;
         s.end()
     }
 }
