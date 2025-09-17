@@ -49,7 +49,7 @@ pub struct Args {
     pub port: u16,
     #[arg(short, long, default_value = "/pathguard")]
     pub dashboard: Box<str>,
-    #[arg(short, long, default_value_t = 80.0)]
+    #[arg(short, long, default_value_t = 60.0)]
     pub min_password_strength: f64,
 }
 
