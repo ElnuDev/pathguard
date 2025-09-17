@@ -11,6 +11,7 @@ pub fn fancy_page(before_main: Markup, main: Markup) -> String {
         html {
             head {
                 script src=(HTMX) {}
+                script src=(SCRIPT) {}
                 link rel="stylesheet" href=(MISSING_CSS);
                 link rel="stylesheet" href=(OVERRIDE_CSS);
             }
@@ -22,7 +23,6 @@ pub fn fancy_page(before_main: Markup, main: Markup) -> String {
                 footer {
                     p { "Simple and easy path protection by " a href="/pathguard" { "pathguard" } "." }
                 }
-                script src=(SCRIPT) {}
             }
         }
     }.0
