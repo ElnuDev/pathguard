@@ -176,6 +176,21 @@ pub async fn post_user(
     })?
 }
 
+pub async fn delete_user(
+    state: web::Data<State>,
+    path: web::Path<String>,
+    session_user: SessionUser,
+) -> Result<HttpResponse, UpdateStateError> {
+    if let Some(res) = session_user.authorization_admin_basic(&state) {
+        return Ok(res);
+    }
+    let name = path.into_inner();
+    if state.update_users(|users| users.shift_remove(&*name).is_none())? {
+        return Ok(ErrorNotFound("That user doesn't exist").error_response());
+    }
+    Ok(HttpResponse::Ok().finish())
+}
+
 #[derive(Deserialize)]
 pub struct NewRule {
     name: String,

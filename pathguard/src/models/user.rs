@@ -99,7 +99,7 @@ impl User {
                     @if name != ADMIN_USERNAME {
                         (icon_button(
                             TRASH,
-                            &format!("hx-delete=\"{dashboard}/users/{name}\" hx-target=\"closest .table.rows > div\"  hx-confirm=\"Are you sure you want to delete this user?\"", dashboard=ARGS.dashboard),
+                            &format!("hx-delete=\"{dashboard}/users/{name}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\" hx-confirm=\"Are you sure you want to delete this user?\"", dashboard=ARGS.dashboard),
                             Some("bad")
                         ))
                     }

@@ -88,7 +88,7 @@ impl Group {
                     @if name != DEFAULT_GROUP {
                         (icon_button(
                             TRASH,
-                            &format!("hx-delete=\"{}/groups/{name}\" hx-target=\"closest .table.rows > div\" hx-confirm=\"Are you sure you want to delete this group?\"", ARGS.dashboard),
+                            &format!("hx-delete=\"{}/groups/{name}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\" hx-confirm=\"Are you sure you want to delete this group?\"", ARGS.dashboard),
                             Some("bad")
                         ))
                     }
