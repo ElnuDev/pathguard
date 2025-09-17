@@ -73,3 +73,61 @@ button, .\<button\> {
 .rule:has(input[value="on"]:checked)::after {
     --translate: calc(2 * var(--size));
 }
+
+body:not(:has(#show-passwords:checked)) .password {
+    -webkit-text-security: disc;
+}
+
+.table div:has(details) {
+    width: 100%;
+}
+
+.table details {
+    margin: 0;
+    width: 100%;
+}
+
+.table details summary {
+    user-select: none;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+select[multiple] {
+    min-width: 8em;
+    height: max-content;
+    padding: 0;
+}
+
+select[multiple] option {
+    border: none;
+}
+
+select[multiple] option:checked {
+    background: var(--ok-fg) !important;
+    color: var(--ok-bg);
+}
+
+details.inline {
+    width: max-content;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+}
+
+details.inline > :not(summary) {
+    position: absolute;
+}
+
+:is(.rows > *, .row) > * {
+    margin: 0 !important;
+    vertical-align: middle !important;
+}
+
+.table {
+    border-spacing: var(--gap);
+    margin: calc(-1 * var(--gap));
+}

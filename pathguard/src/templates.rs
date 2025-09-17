@@ -1,7 +1,11 @@
 use maud::{DOCTYPE, Markup, PreEscaped, html};
-use crate::{HTMX, MISSING_CSS, OVERRIDE_CSS};
+use crate::{HTMX, MISSING_CSS, OVERRIDE_CSS, SCRIPT};
 
 pub fn page(main: Markup) -> String {
+    fancy_page(html! {}, main)
+}
+
+pub fn fancy_page(before_main: Markup, main: Markup) -> String {
     html! {
         (DOCTYPE)
         html {
@@ -11,12 +15,14 @@ pub fn page(main: Markup) -> String {
                 link rel="stylesheet" href=(OVERRIDE_CSS);
             }
             body hx-boost="true" {
+                (before_main)
                 main {
                     (main)
                 }
                 footer {
                     p { "Simple and easy path protection by " a href="/pathguard" { "pathguard" } "." }
                 }
+                script src=(SCRIPT) {}
             }
         }
     }.0

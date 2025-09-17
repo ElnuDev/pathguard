@@ -16,8 +16,9 @@ use maud::html;
 use models::*;
 
 use clap::{Parser, Subcommand};
+use passwords::PasswordGenerator;
 
-use crate::{dashboard::{dashboard, delete_group, delete_rule, logout, patch_rule, post_group, post_login, post_rule}, templates::page};
+use crate::{dashboard::{dashboard, delete_group, delete_rule, logout, patch_rule, post_group, post_login, post_rule, post_user}, templates::page};
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
@@ -48,7 +49,14 @@ pub struct Args {
     pub port: u16,
     #[arg(short, long, default_value = "/pathguard")]
     pub dashboard: Box<str>,
+    #[arg(short, long, default_value_t = 80.0)]
+    pub min_password_strength: f64,
 }
+
+pub const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
+    length: 10,
+    ..PasswordGenerator::new()
+};
 
 lazy_static::lazy_static! {
     pub static ref ARGS: Args = Args::parse();
@@ -57,8 +65,10 @@ lazy_static::lazy_static! {
 pub const LOGIN_ROUTE: &str = "/login";
 pub const LOGOUT_ROUTE: &str = "/logout";
 pub const GROUPS_ROUTE: &str = "/groups";
+pub const USERS_ROUTE: &str = "/users";
 
 pub const HTMX: &str = "/pathguard_htmx.min.js";
+pub const SCRIPT: &str = "/pathguard_script.js";
 pub const MISSING_CSS: &str = "/pathguard_missing.css";
 pub const OVERRIDE_CSS: &str = "/pathguard_override.css";
 
@@ -93,6 +103,8 @@ async fn main() -> std::io::Result<()> {
             .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/{rule}")
                 .patch(patch_rule)
                 .delete(delete_rule))
+            .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE)
+                .post(post_user))
             .service(web::resource(ARGS.dashboard.to_string() + "/{tail:.*}").get(async ||
                 HttpResponse::NotFound().body(page(html! {
                     h1 { "404 Not Found" }
@@ -101,6 +113,11 @@ async fn main() -> std::io::Result<()> {
             ))
             .service(web::resource(HTMX).get(async || {
                 let mut res = HttpResponse::Ok().body(include_str!("htmx.min.js"));
+                res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("application/javascript").unwrap());
+                res
+            }))
+            .service(web::resource(SCRIPT).get(async || {
+                let mut res = HttpResponse::Ok().body(include_str!("script.js"));
                 res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("application/javascript").unwrap());
                 res
             }))

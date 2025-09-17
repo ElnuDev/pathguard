@@ -3,11 +3,11 @@ use std::{
 };
 
 use crate::{
-    ARGS, Args, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, error::{self, Error}, models::{
-        Group, State, group::{self, DEFAULT_GROUP, RULE_NA, RULE_ON, Rule}, state::{AddGroupError, UpdateGroupError, UpdateStateError}, user::{
-            ADMIN_USERNAME, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE
+    ARGS, Args, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE, error::{self, Error}, models::{
+        Group, State, User, group::{self, DEFAULT_GROUP, RULE_NA, RULE_ON, Rule}, state::{AddGroupError, UpdateGroupError, UpdateStateError}, user::{
+            ADMIN_USERNAME, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE, UserValidationError
         }
-    }, templates::{const_icon_button, page}
+    }, templates::{const_icon_button, fancy_page, page}
 };
 use actix_htmx::{Htmx, SwapType};
 use actix_web::{
@@ -15,9 +15,10 @@ use actix_web::{
 };
 use awc::{cookie::time::format_description::modifier::WeekNumberRepr, http::StatusCode};
 use clap::builder::Str;
+use indexmap::IndexSet;
 use maud::{html, Markup, PreEscaped};
 use qstring;
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 
@@ -36,18 +37,21 @@ pub async fn dashboard(
         return Ok(res);
     }
 
-    Ok(HttpResponse::Ok().body(page(html! {
-        style { (PreEscaped(".box.bad:has(#error:empty) { display: none }"))}
-        .box.bad {
-            strong.titlebar { "Error" }
-            #error {}
+    Ok(HttpResponse::Ok().body(fancy_page(html! {
+        header.navbar {
+            nav {
+                ul role="list" {
+                    li { a.allcaps href="#" { "pathguard" } }
+                    li { a href="#groups" { "Groups" } }
+                    li { a href="#users" { "Users" } }
+                }
+            }
+            nav style="margin-left: auto" {
+                "Hello, " strong { (ADMIN_USERNAME) } " "
+                a href={(ARGS.dashboard) (LOGOUT_ROUTE)} { "Log out" }
+            }
         }
-        span.float:right {
-            "Hello, " (ADMIN_USERNAME) " "
-            a href={(ARGS.dashboard) (LOGOUT_ROUTE)} { "Log out" }
-        }
-        h1 { "Dashboard" }
-        h2 { "Groups" }
+    },html! {
         svg xmlns="http://www.w3.org/2000/svg" style="display: none" {
             symbol #(TRASH_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
                 (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />"#))
@@ -56,7 +60,9 @@ pub async fn dashboard(
                 (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />"#))
             }
         }
-        div.table.rows {
+        h1 { "Dashboard" }
+        h2 #groups { "Groups" }
+        .table.rows {
             @for (group_name, group) in state.groups.read().or(Err(Error::InternalServer))?.iter() {
                 @let group = group.read().or(Err(Error::InternalServer))?;
                 (group.display(group_name))
@@ -66,7 +72,108 @@ pub async fn dashboard(
                 input type="text" name="name" required;
             }
         }
+        h2 #users { "Users" }
+        p { label style="user-select: none" { "Show passwords? " input #show-passwords type="checkbox" autocomplete="off"; } }
+        .table.rows {
+            @for (user_name, user) in state.users.read().or(Err(Error::InternalServer))?.iter() {
+                (user.display(user_name))
+            }
+            (new_user_form(false))
+        }
     })))
+}
+
+fn new_user_form(autofocus: bool) -> Markup {
+    html! {
+        form
+            autocomplete="off"
+            hx-post={ (ARGS.dashboard) (USERS_ROUTE) }
+            hx-swap="outerHTML"
+        {
+            div { (const_icon_button!(PLUS, "", "ok")) }
+            div {
+                .flex-row.align-items:center {
+                    div { input type="text" name="name" placeholder="username" required autofocus[autofocus]; }
+                    div { input type="text" name="password" placeholder="password" value=[PASSWORD_GENERATOR.generate_one().ok()] required; }
+                    div {
+                        details.inline {
+                            summary { "Groups" }
+                            select name="groups" multiple {
+                                option value="foo" { "Foo" }
+                                option value="bar" { "Bar" }
+                                option value="baz" { "Baz" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum AddUserError {
+    #[error("{0}")]
+    UpdateState(#[from] UpdateStateError),
+    #[error("That user already exists")]
+    AlreadyExists,
+    #[error("{0}")]
+    Validation(#[from] UserValidationError),
+}
+
+impl ResponseError for AddUserError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Self::UpdateState(err) => err.status_code(),
+            Self::AlreadyExists => StatusCode::CONFLICT,
+            Self::Validation(err) => err.status_code(),
+        }
+    }
+}
+
+pub async fn post_user(
+    state: web::Data<State>,
+    htmx: Htmx,
+    web::Form(query): web::Form<Vec<(String, String)>>,
+    session_user: SessionUser,
+) -> Result<HttpResponse, AddUserError> {
+    use AddUserError::*;
+    if let Some(res) = session_user.authorization_admin_basic(&state) {
+        return Ok(res);
+    }
+    let Some((name, user)) = (|| -> Option<(Box<str>, User)> {
+        let mut name = None;
+        let mut password = None;
+        let mut groups = IndexSet::new();
+        for (key, value) in query {
+            match key.as_str() {
+                "name" => name = Some(value.into_boxed_str()),
+                "password" => password = Some(SecretString::from(value)),
+                "groups" => { groups.insert(value.into_boxed_str()); },
+                _ => {}
+            }
+        }
+        Some((name?, User::new(password?, groups)))
+    })() else {
+        return Ok(ErrorBadRequest("missing field(s)").error_response())
+    };
+    state.update_users(|users| {
+        if users.contains_key(&name) {
+            return Err(AlreadyExists);
+        }
+        user.validate(&name, &*state.groups.read().or(Err(UpdateState(UpdateStateError::Poison)))?)?;
+        let mut res = HttpResponse::Ok();
+        let res = if htmx.is_htmx {
+            res.body(html! {
+                (user.display(&name))
+                (new_user_form(true))
+            }.0)
+        } else {
+            res.finish()
+        };
+        users.insert(name, user);
+        Ok(res)
+    })?
 }
 
 #[derive(Deserialize)]
@@ -290,13 +397,6 @@ pub fn login_form(invalid: bool, return_uri: &str) -> Markup {
     }
 }
 
-fn login_page(content: Markup) -> String {
-    page(html! {
-        h1 { "Login" }
-        (content)
-    })
-}
-
 const QUERY_REDIRECT: &str = "r";
 
 pub async fn logout(
@@ -361,7 +461,10 @@ pub async fn post_login(
     Ok(if from_htmx {
         HttpResponse::Ok().body(login_form(true, &return_uri).0)
     } else {
-        HttpResponse::Unauthorized().body(login_page(login_form(true, &return_uri)))
+        HttpResponse::Unauthorized().body(html! {
+            h1 { "Log in" }
+            (login_form(true, &return_uri))
+        }.0)
     })
 }
 
