@@ -28,7 +28,7 @@ document.body.addEventListener('htmx:beforeSwap', event => {
     makeModal();
     modalTitleBar.innerHTML = `Error: ${event.detail.xhr.status} ${event.detail.xhr.statusText}`;
     modal.classList.toggle("bad", true);
-    modalMessageContainer.innerHTML = `<p>${event.detail.serverResponse || `${event.detail.xhr.status} ${event.detail.xhr.statusText}`}</p>`;
+    modalMessageContainer.innerHTML = `<p>${event.detail.serverResponse || "Something went wrong."}</p>`;
     modal.showModal();
 });
 
