@@ -1,18 +1,16 @@
-use std::{borrow::Cow, convert::Infallible, fmt::{Debug, Display}, fs, future::{self, Ready}, io, ops::Deref, path::PathBuf, slice::EscapeAscii, sync::{Mutex, RwLock}};
-use actix_htmx::Htmx;
-use actix_web::{FromRequest, HttpRequest, HttpResponse, HttpResponseBuilder, Responder, ResponseError, error::{ErrorUnauthorized, InternalError}, web};
-use awc::{cookie::Cookie, http::StatusCode};
+use std::{convert::Infallible, fmt::{Debug, Display}, future::{self, Ready}, ops::Deref, sync::RwLock};
+use actix_web::{FromRequest, HttpRequest, HttpResponse, ResponseError, error::ErrorUnauthorized};
+use awc::http::StatusCode;
 use chrono::{DateTime, Utc};
-use clap::Arg;
 use indexmap::{IndexMap, IndexSet};
-use maud::{Markup, PreEscaped, html};
+use maud::{Markup, html};
 use thiserror::Error;
 
-use secrecy::{ExposeSecret, SecretBox, SecretString};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use csv;
 
-use crate::{ARGS, Args, LOGOUT_ROUTE, USERS_ROUTE, dashboard::{CHECK, PENCIL_SQUARE, TRASH, X_MARK, groups_select, groups_select_ok, login_form, user_groups}, error::Error, models::{Group, State, group::{self, DEFAULT_GROUP}, user}, templates::{icon_button, page}};
+use crate::{ARGS, Args, LOGOUT_ROUTE, USERS_ROUTE, dashboard::{CHECK, PENCIL_SQUARE, TRASH, X_MARK, groups_select, login_form, user_groups}, error::Error, models::{Group, State, group::DEFAULT_GROUP}, templates::{icon_button, page}};
 
 pub const ADMIN_USERNAME: &str = "admin";
 pub const ADMIN_DEFAULT_PASSWORD: &str = "password";

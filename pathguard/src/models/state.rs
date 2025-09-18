@@ -1,13 +1,12 @@
-use std::{f32::consts::E, fs::{self, File}, io, ops::Deref, path::PathBuf, sync::{Mutex, RwLock, RwLockReadGuard}};
-use actix_web::{ResponseError, mime::CSV, http::StatusCode};
-use clap::builder::Str;
+use std::{fs::{self}, io, path::PathBuf, sync::RwLock};
+use actix_web::{ResponseError, http::StatusCode};
 use indexmap::IndexMap;
 use thiserror::Error;
 
 use serde::{Deserialize, Serialize};
 use csv;
 
-use crate::{Args, error::Error, models::{Group, User, UserData, group::{self, DEFAULT_GROUP, Rule}, user::{self, ADMIN_USERNAME, OwnedUserData}}};
+use crate::{Args, models::{Group, User, UserData, group::{DEFAULT_GROUP, Rule}, user::OwnedUserData}};
 
 pub type Users = IndexMap<Box<str>, User>;
 

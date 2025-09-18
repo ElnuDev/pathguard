@@ -44,7 +44,6 @@ macro_rules! const_icon {
         PreEscaped(icon_raw!($name))
     };
 }
-pub(crate) use const_icon;
 
 pub fn icon_raw(name: &str) -> String {
     icon(name).0

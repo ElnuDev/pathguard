@@ -1,24 +1,22 @@
 use std::{
-    borrow::Cow, convert::Infallible, default, fmt::{Debug, Display}, future::{Future, Ready, ready}, ops::Deref, path, sync::RwLock
+    borrow::Cow, convert::Infallible, fmt::{Debug, Display}, future::Ready, ops::Deref, sync::RwLock
 };
 
 use crate::{
-    ARGS, Args, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE, error::{self, BasicError, Error}, models::{
-        Group, State, User, group::{self, DEFAULT_GROUP, RULE_NA, RULE_ON, Rule}, state::{AddGroupError, UpdateGroupError, UpdateStateError}, user::{
-            self, ADMIN_USERNAME, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE, UserDisplayMode, UserValidationError
+    ARGS, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE, error::{BasicError, Error}, models::{
+        Group, State, User, group::{self, DEFAULT_GROUP, Rule}, state::{AddGroupError, UpdateGroupError, UpdateStateError}, user::{
+            ADMIN_USERNAME, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE, UserDisplayMode, UserValidationError
         }
-    }, templates::{const_icon_button, fancy_page, page}
+    }, templates::{const_icon_button, fancy_page}
 };
 use actix_htmx::{Htmx, SwapType};
 use actix_web::{
-    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError, cookie::Cookie, dev::Url, error::{ErrorBadRequest, ErrorInternalServerError, ErrorNotFound, ErrorUnauthorized, InternalError}, get, http::header::{HeaderName, HeaderValue, REFERER}, web::{self, Redirect, head}
+    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError, cookie::Cookie, error::{ErrorBadRequest, ErrorNotFound, InternalError}, http::header::{HeaderName, HeaderValue, REFERER}, web::{self, Redirect}
 };
-use awc::{cookie::time::format_description::modifier::WeekNumberRepr, http::StatusCode};
-use chrono::OutOfRange;
-use clap::builder::Str;
+use awc::http::StatusCode;
 use indexmap::{IndexMap, IndexSet};
 use maud::{html, Markup, PreEscaped};
-use qstring::{self, QString};
+use qstring::{self};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer};
 use thiserror::Error;

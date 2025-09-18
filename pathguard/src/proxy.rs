@@ -1,9 +1,7 @@
-use actix_web::{HttpRequest, HttpResponse, ResponseError, body::BoxBody, http::{StatusCode, header::ContentType}, web};
-use awc::{Client, error::SendRequestError};
-use maud::html;
-use thiserror::Error;
+use actix_web::{HttpRequest, HttpResponse, web};
+use awc::Client;
 
-use crate::{Args, templates::page, error::Error};
+use crate::error::Error;
 
 pub async fn proxy(
     req: HttpRequest,

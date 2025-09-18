@@ -1,13 +1,11 @@
 use std::{fs::File, io, ops::{Deref, DerefMut}, path::Path};
 
-use actix_web::http::uri::Uri;
-use clap::builder::Str;
 use csv::Writer;
 use indexmap::IndexMap;
 use maud::{Markup, html};
 use serde::{Deserialize, Serialize, ser::SerializeStruct};
 
-use crate::{ARGS, Args, GROUPS_ROUTE, dashboard::{PLUS, TRASH}, templates::{const_icon_button, icon_button}};
+use crate::{ARGS, GROUPS_ROUTE, dashboard::{PLUS, TRASH}, templates::{const_icon_button, icon_button}};
 
 pub type Rule = Option<bool>;
 
