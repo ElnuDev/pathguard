@@ -1,12 +1,24 @@
-use std::{fs::{self}, io, path::PathBuf, sync::RwLock};
-use actix_web::{ResponseError, http::StatusCode};
+use actix_web::{http::StatusCode, ResponseError};
 use indexmap::IndexMap;
+use std::{
+    fs::{self},
+    io,
+    path::PathBuf,
+    sync::RwLock,
+};
 use thiserror::Error;
 
-use serde::{Deserialize, Serialize};
 use csv;
+use serde::{Deserialize, Serialize};
 
-use crate::{Args, models::{Group, User, UserData, group::{DEFAULT_GROUP, Rule}, user::OwnedUserData}};
+use crate::{
+    models::{
+        group::{Rule, DEFAULT_GROUP},
+        user::OwnedUserData,
+        Group, User, UserData,
+    },
+    Args,
+};
 
 pub type Users = IndexMap<Box<str>, User>;
 
@@ -81,7 +93,13 @@ impl ResponseError for UpdateGroupError {
 const CSV_EXTENSION: &str = ".csv";
 
 impl State {
-    pub fn load(Args { users_file, groups_dir, .. }: &Args) -> Result<Self, LoadStateError> {
+    pub fn load(
+        Args {
+            users_file,
+            groups_dir,
+            ..
+        }: &Args,
+    ) -> Result<Self, LoadStateError> {
         let mut users = IndexMap::new();
         if fs::exists(users_file)? {
             let mut reader = csv::Reader::from_path(&users_file)?;
@@ -112,10 +130,16 @@ impl State {
                     panic!("Unexpected file in groups directory {file_name_lossy}");
                 }
                 let mut reader = csv::Reader::from_path(entry.path())?;
-                let group_name = file_name_lossy[..file_name_lossy.len() - CSV_EXTENSION.len()].to_string();
-                groups.insert(group_name, RwLock::new(Group(reader
-                    .deserialize::<(String, Rule)>()
-                    .collect::<Result<IndexMap<String, Rule>, csv::Error>>()?)));
+                let group_name =
+                    file_name_lossy[..file_name_lossy.len() - CSV_EXTENSION.len()].to_string();
+                groups.insert(
+                    group_name,
+                    RwLock::new(Group(
+                        reader
+                            .deserialize::<(String, Rule)>()
+                            .collect::<Result<IndexMap<String, Rule>, csv::Error>>()?,
+                    )),
+                );
             }
         } else {
             fs::create_dir(groups_dir)?;
@@ -136,18 +160,20 @@ impl State {
     }
 
     pub fn update_users<F, T>(&self, f: F) -> Result<T, UpdateStateError>
-    where F: FnOnce(&mut Users) -> T
+    where
+        F: FnOnce(&mut Users) -> T,
     {
-        let result = f(&mut *self.users
-            .write()
-            .or(Err(UpdateStateError::Poison))?);
+        let result = f(&mut *self.users.write().or(Err(UpdateStateError::Poison))?);
         let mut writer = csv::Writer::from_path(&self.users_file)?;
-        for user in self.users.read()
+        for user in self
+            .users
+            .read()
             .or(Err(UpdateStateError::Poison))?
             .iter()
-            .map(|(name, user)| UserData { name, user }) {
-                writer.serialize(user)?;
-            }
+            .map(|(name, user)| UserData { name, user })
+        {
+            writer.serialize(user)?;
+        }
         writer.flush()?;
         Ok(result)
     }
@@ -171,17 +197,18 @@ impl State {
     }
 
     pub fn update_group<F, T>(&self, group_name: &str, f: F) -> Result<T, UpdateGroupError>
-    where F: FnOnce(&mut Group) -> T
+    where
+        F: FnOnce(&mut Group) -> T,
     {
-        let groups = self.groups
-            .read()
-            .map_err(|_| UpdateStateError::Poison)?;
+        let groups = self.groups.read().map_err(|_| UpdateStateError::Poison)?;
         let Some(lock) = groups.get(group_name) else {
             return Err(UpdateGroupError::DoesNotExist);
         };
         let mut group = lock.write().or(Err(UpdateStateError::Poison))?;
         let result = f(&mut group);
-        group.write(&self.group_file(group_name)).map_err(|err| UpdateStateError::Io(err))?;
+        group
+            .write(&self.group_file(group_name))
+            .map_err(|err| UpdateStateError::Io(err))?;
         Ok(result)
     }
 
@@ -189,14 +216,14 @@ impl State {
         if group_name.is_empty() {
             return Err(AddGroupError::BadGroupName);
         }
-        let mut groups = self.groups
-            .write()
-            .map_err(|_| UpdateStateError::Poison)?;
+        let mut groups = self.groups.write().map_err(|_| UpdateStateError::Poison)?;
         if groups.contains_key(group_name) {
             return Err(AddGroupError::AlreadyExists);
         }
         let group = Group::default();
-        group.write(&self.group_file(group_name)).map_err(|err| UpdateStateError::Io(err))?;
+        group
+            .write(&self.group_file(group_name))
+            .map_err(|err| UpdateStateError::Io(err))?;
         groups.insert(group_name.to_string(), RwLock::new(Group::default()));
         Ok(())
     }

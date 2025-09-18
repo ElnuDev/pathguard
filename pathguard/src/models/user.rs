@@ -1,16 +1,28 @@
-use std::{convert::Infallible, fmt::{Debug, Display}, future::{self, Ready}, ops::Deref, sync::RwLock};
-use actix_web::{FromRequest, HttpRequest, HttpResponse, ResponseError, error::ErrorUnauthorized};
+use actix_web::{error::ErrorUnauthorized, FromRequest, HttpRequest, HttpResponse, ResponseError};
 use awc::http::StatusCode;
 use chrono::{DateTime, Utc};
 use indexmap::{IndexMap, IndexSet};
-use maud::{Markup, html};
+use maud::{html, Markup};
+use std::{
+    convert::Infallible,
+    fmt::{Debug, Display},
+    future::{self, Ready},
+    ops::Deref,
+    sync::RwLock,
+};
 use thiserror::Error;
 
-use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use csv;
+use secrecy::{ExposeSecret, SecretString};
+use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{ARGS, Args, LOGOUT_ROUTE, USERS_ROUTE, dashboard::{CHECK, PENCIL_SQUARE, TRASH, X_MARK, groups_select, login_form, user_groups}, error::Error, models::{Group, State, group::DEFAULT_GROUP}, templates::{icon_button, page}};
+use crate::{
+    dashboard::{groups_select, login_form, user_groups, CHECK, PENCIL_SQUARE, TRASH, X_MARK},
+    error::Error,
+    models::{group::DEFAULT_GROUP, Group, State},
+    templates::{icon_button, page},
+    Args, ARGS, LOGOUT_ROUTE, USERS_ROUTE,
+};
 
 pub const ADMIN_USERNAME: &str = "admin";
 pub const ADMIN_DEFAULT_PASSWORD: &str = "password";
@@ -42,7 +54,9 @@ pub enum UserValidationError {
 impl ResponseError for UserValidationError {
     fn status_code(&self) -> StatusCode {
         match self {
-            Self::WeakPassword { .. } | Self::CommonPassword(_) | Self::DefaultGroup => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::WeakPassword { .. } | Self::CommonPassword(_) | Self::DefaultGroup => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             Self::GroupDoesNotExist { .. } => StatusCode::CONFLICT,
         }
     }
@@ -52,7 +66,9 @@ impl ResponseError for UserValidationError {
 pub enum UserDisplayMode<'a> {
     #[default]
     Normal,
-    Edit { state: &'a State }
+    Edit {
+        state: &'a State,
+    },
 }
 
 impl User {
@@ -71,17 +87,25 @@ impl User {
         }
     }
 
-    pub fn validate(&self, global_groups: &IndexMap<String, RwLock<Group>>) -> Result<(), UserValidationError> {
+    pub fn validate(
+        &self,
+        global_groups: &IndexMap<String, RwLock<Group>>,
+    ) -> Result<(), UserValidationError> {
         use UserValidationError::*;
 
         let analyzed = passwords::analyzer::analyze(self.password.expose_secret());
         if analyzed.is_common() {
-            return Err(CommonPassword(self.password.expose_secret().to_string().into_boxed_str()))
+            return Err(CommonPassword(
+                self.password.expose_secret().to_string().into_boxed_str(),
+            ));
         }
 
         let strength = passwords::scorer::score(&analyzed);
         if strength < ARGS.min_password_strength {
-            return Err(WeakPassword { strength, min: ARGS.min_password_strength });
+            return Err(WeakPassword {
+                strength,
+                min: ARGS.min_password_strength,
+            });
         }
 
         for group in &self.groups {
@@ -92,7 +116,8 @@ impl User {
                 return Err(GroupDoesNotExist(group.clone()));
             }
         }
-        if let Some(group) = self.groups
+        if let Some(group) = self
+            .groups
             .iter()
             .filter(|group| !global_groups.contains_key(group.as_ref()))
             .next()
@@ -103,7 +128,12 @@ impl User {
         Ok(())
     }
 
-    fn display_partial_with_encoded(&self, name: &str, mode: UserDisplayMode, name_encoded: &str) -> Markup {
+    fn display_partial_with_encoded(
+        &self,
+        name: &str,
+        mode: UserDisplayMode,
+        name_encoded: &str,
+    ) -> Markup {
         html! {
             dl {
                 @match mode {
@@ -211,7 +241,7 @@ pub type OwnedUserData = UserData<Box<str>, User>;
 
 fn deserialize_groups<'de, D>(deserializer: D) -> Result<IndexSet<Box<str>>, D::Error>
 where
-    D: Deserializer<'de>
+    D: Deserializer<'de>,
 {
     let s: String = Deserialize::deserialize(deserializer)?;
     let trimmed = s.trim();
@@ -225,15 +255,18 @@ where
 }
 
 impl<N, U> Serialize for UserData<N, U>
-where N: AsRef<str>, U: AsRef<User>
+where
+    N: AsRef<str>,
+    U: AsRef<User>,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer {
+    where
+        S: Serializer,
+    {
         let mut s = serializer.serialize_struct("user", 5)?;
         s.serialize_field("name", self.name.as_ref())?;
         s.serialize_field("password", self.user.as_ref().password.expose_secret())?;
-        s.serialize_field("groups", & 'groups: {
+        s.serialize_field("groups", &'groups: {
             let mut s = String::new();
             let mut iter = self.user.as_ref().groups.iter();
             if let Some(next) = iter.next() {
@@ -323,11 +356,15 @@ impl UnauthorizedError {
 
 impl Display for UnauthorizedError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match self {
-            Self::NotLoggedIn => "Unauthorized: not logged in",
-            Self::LoggedIn => "Unauthorized",
-            Self::BadLogin => "Unauthorized: invalid credentials"
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::NotLoggedIn => "Unauthorized: not logged in",
+                Self::LoggedIn => "Unauthorized",
+                Self::BadLogin => "Unauthorized: invalid credentials",
+            }
+        )
     }
 }
 
@@ -361,7 +398,11 @@ impl UnauthorizedResponse for crate::error::Result<Authorization> {
 }
 
 impl SessionUser {
-    pub fn authorization_admin_fancy(&self, state: &State, req: &HttpRequest) -> Option<HttpResponse> {
+    pub fn authorization_admin_fancy(
+        &self,
+        state: &State,
+        req: &HttpRequest,
+    ) -> Option<HttpResponse> {
         self.authorization_admin(state).fancy(req, self)
     }
 
@@ -369,7 +410,12 @@ impl SessionUser {
         self.authorization_admin(state).basic()
     }
 
-    pub fn authorization_fancy(&self, state: &State, req: &HttpRequest, args: &Args) -> Option<HttpResponse> {
+    pub fn authorization_fancy(
+        &self,
+        state: &State,
+        req: &HttpRequest,
+        args: &Args,
+    ) -> Option<HttpResponse> {
         self.authorization(req, state).fancy(req, self)
     }
 
@@ -382,17 +428,17 @@ impl SessionUser {
         let Some(cookies) = &self.0 else {
             return Ok(Err(NotLoggedIn));
         };
-        match state.update_users(|users| {
-            users
-                .get_mut(&cookies.username)
-                .map(|user| {
+        match state
+            .update_users(|users| {
+                users.get_mut(&cookies.username).map(|user| {
                     let auth = user.password.expose_secret() == &*cookies.password;
                     if auth {
                         user.last_active = Some(Utc::now());
                     }
                     auth
                 })
-        }).or(Err(Error::InternalServer))?
+            })
+            .or(Err(Error::InternalServer))?
         {
             Some(true) if &*cookies.username == ADMIN_USERNAME => Ok(Ok(())),
             Some(true) => Ok(Err(LoggedIn)),
@@ -400,24 +446,27 @@ impl SessionUser {
         }
     }
 
-    fn authorization(&self, req: &HttpRequest, state: &State) -> crate::error::Result<Authorization> {
+    fn authorization(
+        &self,
+        req: &HttpRequest,
+        state: &State,
+    ) -> crate::error::Result<Authorization> {
         return todo!();
         use UnauthorizedError::*;
         const OK: crate::error::Result<Authorization> = Ok(Authorization::Ok(()));
-        let groups = state.groups
-            .read()
-            .or(Err(Error::InternalServer))?;
+        let groups = state.groups.read().or(Err(Error::InternalServer))?;
         // If resource has public access, session user has access regardless
         if groups
-                .get(DEFAULT_GROUP)
-                .map(|group| group
+            .get(DEFAULT_GROUP)
+            .map(|group| {
+                group
                     .read()
-                    .map(|group| group
-                        .allowed(req.path())
-                        .unwrap_or_default())
-                    .ok())
-                .flatten()
-                .ok_or(Error::InternalServer)? {
+                    .map(|group| group.allowed(req.path()).unwrap_or_default())
+                    .ok()
+            })
+            .flatten()
+            .ok_or(Error::InternalServer)?
+        {
             return OK;
         }
         let Some(cookies) = &self.0 else {
@@ -426,9 +475,10 @@ impl SessionUser {
         let users = &*state.users.read().or(Err(Error::InternalServer))?;
         let Some(user) = users
             .get(&cookies.username)
-            .filter(|true_user| true_user.password.expose_secret() == &*cookies.password) else {
-                return Ok(Err(BadLogin));
-            };
+            .filter(|true_user| true_user.password.expose_secret() == &*cookies.password)
+        else {
+            return Ok(Err(BadLogin));
+        };
         let mut allowed = false;
         for group_name in &user.groups {
             let Some(group_lock) = groups.get(group_name.deref()) else {
@@ -439,7 +489,11 @@ impl SessionUser {
                 allowed = group_allowed;
             }
         }
-        if allowed { OK } else { Ok(Err(LoggedIn)) }
+        if allowed {
+            OK
+        } else {
+            Ok(Err(LoggedIn))
+        }
     }
 
     pub fn logout<T>(&self, req: &HttpRequest, res: &mut HttpResponse<T>) {
@@ -457,7 +511,10 @@ impl FromRequest for SessionUser {
 
     type Future = Ready<Result<Self, Self::Error>>;
 
-    fn from_request(req: &actix_web::HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {
+    fn from_request(
+        req: &actix_web::HttpRequest,
+        _payload: &mut actix_web::dev::Payload,
+    ) -> Self::Future {
         future::ready(Ok(Self((|| {
             let Some(username_cookie) = req.cookie(USERNAME_COOKIE) else {
                 return None;

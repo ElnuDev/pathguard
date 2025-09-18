@@ -1,17 +1,33 @@
 use std::{
-    borrow::Cow, convert::Infallible, fmt::{Debug, Display}, future::Ready, ops::Deref, sync::RwLock
+    borrow::Cow,
+    convert::Infallible,
+    fmt::{Debug, Display},
+    future::Ready,
+    ops::Deref,
+    sync::RwLock,
 };
 
 use crate::{
-    ARGS, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE, error::{BasicError, Error}, models::{
-        Group, State, User, group::{self, DEFAULT_GROUP, Rule}, state::{AddGroupError, UpdateGroupError, UpdateStateError}, user::{
-            ADMIN_USERNAME, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE, UserDisplayMode, UserValidationError
-        }
-    }, templates::{const_icon_button, fancy_page}
+    error::{BasicError, Error},
+    models::{
+        group::{self, Rule, DEFAULT_GROUP},
+        state::{AddGroupError, UpdateGroupError, UpdateStateError},
+        user::{
+            SessionUser, UserDisplayMode, UserValidationError, ADMIN_USERNAME, PASSWORD_COOKIE,
+            USERNAME_COOKIE,
+        },
+        Group, State, User,
+    },
+    templates::{const_icon_button, fancy_page},
+    ARGS, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE,
 };
 use actix_htmx::{Htmx, SwapType};
 use actix_web::{
-    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError, cookie::Cookie, error::{ErrorBadRequest, ErrorNotFound, InternalError}, http::header::{HeaderName, HeaderValue, REFERER}, web::{self, Redirect}
+    cookie::Cookie,
+    error::{ErrorBadRequest, ErrorNotFound, InternalError},
+    http::header::{HeaderName, HeaderValue, REFERER},
+    web::{self, Redirect},
+    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError,
 };
 use awc::http::StatusCode;
 use indexmap::{IndexMap, IndexSet};
@@ -103,10 +119,16 @@ pub async fn dashboard(
 }
 
 fn new_user_form_ok(autofocus: bool, groups: &IndexMap<String, RwLock<Group>>) -> Markup {
-    new_user_form(autofocus, Result::<&IndexMap<String, RwLock<Group>>, Infallible>::Ok(groups))
+    new_user_form(
+        autofocus,
+        Result::<&IndexMap<String, RwLock<Group>>, Infallible>::Ok(groups),
+    )
 }
 
-fn new_user_form<E: Display>(autofocus: bool, groups: Result<impl Deref<Target = IndexMap<String, RwLock<Group>>>, E>) -> Markup {
+fn new_user_form<E: Display>(
+    autofocus: bool,
+    groups: Result<impl Deref<Target = IndexMap<String, RwLock<Group>>>, E>,
+) -> Markup {
     html! {
         form
             autocomplete="off"
@@ -130,7 +152,10 @@ fn new_user_form<E: Display>(autofocus: bool, groups: Result<impl Deref<Target =
     }
 }
 
-pub async fn get_groups(state: web::Data<State>, session_user: SessionUser) -> Result<HttpResponse, BasicError> {
+pub async fn get_groups(
+    state: web::Data<State>,
+    session_user: SessionUser,
+) -> Result<HttpResponse, BasicError> {
     if let Some(res) = session_user.authorization_admin_basic(&state) {
         return Ok(res);
     }
@@ -140,7 +165,7 @@ pub async fn get_groups(state: web::Data<State>, session_user: SessionUser) -> R
 pub async fn get_user_groups(
     state: web::Data<State>,
     path: web::Path<String>,
-    session_user: SessionUser
+    session_user: SessionUser,
 ) -> Result<HttpResponse, Error> {
     if let Some(res) = session_user.authorization_admin_basic(&state) {
         return Ok(res);
@@ -167,10 +192,16 @@ pub fn user_groups(name: &str, user: &User) -> Markup {
 }
 
 pub fn groups_select_ok(groups: &IndexMap<String, RwLock<Group>>, user: Option<&User>) -> Markup {
-    groups_select(Result::<&IndexMap<String, RwLock<Group>>, Infallible>::Ok(groups), user)
+    groups_select(
+        Result::<&IndexMap<String, RwLock<Group>>, Infallible>::Ok(groups),
+        user,
+    )
 }
 
-pub fn groups_select<E: Display>(groups: Result<impl Deref<Target = IndexMap<String, RwLock<Group>>>, E>, user: Option<&User>) -> Markup {
+pub fn groups_select<E: Display>(
+    groups: Result<impl Deref<Target = IndexMap<String, RwLock<Group>>>, E>,
+    user: Option<&User>,
+) -> Markup {
     match groups {
         Ok(groups) => html! {
             select hx-trigger="groups from:body" hx-get={ (ARGS.dashboard) (GROUPS_ROUTE) } name="groups" multiple {
@@ -270,20 +301,29 @@ pub async fn post_user(
         .into_iter()
         .filter(|(key, _value)| key.as_str() == "name")
         .map(|(_key, value)| value.into_boxed_str())
-        .next() else {
-            return Ok(ErrorBadRequest("missing username field").error_response());
-        };
+        .next()
+    else {
+        return Ok(ErrorBadRequest("missing username field").error_response());
+    };
     state.update_users(|users| {
         if users.contains_key(&name) {
             return Err(AlreadyExists);
         }
-        user.validate(&*state.groups.read().or(Err(UpdateState(UpdateStateError::Poison)))?)?;
+        user.validate(
+            &*state
+                .groups
+                .read()
+                .or(Err(UpdateState(UpdateStateError::Poison)))?,
+        )?;
         let mut res = HttpResponse::Ok();
         let res = if htmx.is_htmx {
-            res.body(html! {
-                (user.display(&name, UserDisplayMode::Normal))
-                (new_user_form(true, state.groups.read()))
-            }.0)
+            res.body(
+                html! {
+                    (user.display(&name, UserDisplayMode::Normal))
+                    (new_user_form(true, state.groups.read()))
+                }
+                .0,
+            )
         } else {
             res.finish()
         };
@@ -292,25 +332,33 @@ pub async fn post_user(
     })?
 }
 
-pub fn get_user_generic(edit: bool) -> impl AsyncFn(web::Data<State>, web::Path<String>, SessionUser) -> Result<HttpResponse, BasicError> {
-    async move |
-        state: web::Data<State>,
-        path: web::Path<String>,
-        session_user: SessionUser,
-    | -> Result<HttpResponse, BasicError> {
+pub fn get_user_generic(
+    edit: bool,
+) -> impl AsyncFn(web::Data<State>, web::Path<String>, SessionUser) -> Result<HttpResponse, BasicError>
+{
+    async move |state: web::Data<State>,
+                path: web::Path<String>,
+                session_user: SessionUser|
+                -> Result<HttpResponse, BasicError> {
         if let Some(res) = session_user.authorization_admin_basic(&state) {
             return Ok(res);
         }
         let name = path.into_inner();
         let lock = state.users.read().or(Err(Error::InternalServer))?;
-        let Some(user) = lock.get(&*name)  else {
+        let Some(user) = lock.get(&*name) else {
             return Ok(ErrorNotFound("That user doesn't exist").error_response());
         };
-        Ok(HttpResponse::Ok().body(user.display_partial(&name, if edit {
-            UserDisplayMode::Edit { state: &state }
-        } else {
-            UserDisplayMode::Normal
-        }).0))
+        Ok(HttpResponse::Ok().body(
+            user.display_partial(
+                &name,
+                if edit {
+                    UserDisplayMode::Edit { state: &state }
+                } else {
+                    UserDisplayMode::Normal
+                },
+            )
+            .0,
+        ))
     }
 }
 
@@ -408,7 +456,8 @@ pub async fn post_rule(
         return Ok(res);
     }
     let group_name = path.into_inner();
-    let body = htmx.is_htmx
+    let body = htmx
+        .is_htmx
         .then(|| Group::display_rule(&group_name, &name, &Default::default()).0);
     state.update_group(&group_name, |group| {
         if group.contains_key(&name) {
@@ -428,7 +477,7 @@ pub async fn post_rule(
 }
 
 #[derive(Error, Debug)]
-pub enum UpdateRuleError{
+pub enum UpdateRuleError {
     #[error("{0}")]
     UpdateGroup(#[from] UpdateGroupError),
     #[error("That rule doesn't exist")]
@@ -472,7 +521,9 @@ pub struct PatchRule {
 }
 
 fn deserialize_rule<'de, D>(deserializer: D) -> Result<Rule, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     Ok(match String::deserialize(deserializer)?.as_str() {
         group::RULE_OFF => Some(false),
         group::RULE_NA => None,
@@ -510,12 +561,20 @@ pub struct NewGroup {
 }
 
 fn refetch_groups(htmx: &Htmx) {
-    htmx.trigger_event("groups".to_string(), None, Some(actix_htmx::TriggerType::AfterSwap));
+    htmx.trigger_event(
+        "groups".to_string(),
+        None,
+        Some(actix_htmx::TriggerType::AfterSwap),
+    );
 }
 
 fn refetch_groups_deleted(htmx: &Htmx) {
     refetch_groups(htmx);
-    htmx.trigger_event("groupsDeleted".to_string(), None, Some(actix_htmx::TriggerType::AfterSwap));
+    htmx.trigger_event(
+        "groupsDeleted".to_string(),
+        None,
+        Some(actix_htmx::TriggerType::AfterSwap),
+    );
 }
 
 pub async fn post_group(
@@ -532,16 +591,18 @@ pub async fn post_group(
         let mut res = HttpResponse::Ok();
         if htmx.is_htmx {
             refetch_groups(&htmx);
-            res.body(state
-                .groups
-                .read()
-                .unwrap()
-                .get(&*form.name)
-                .unwrap()
-                .read()
-                .unwrap()
-                .display(&form.name)
-                .0)
+            res.body(
+                state
+                    .groups
+                    .read()
+                    .unwrap()
+                    .get(&*form.name)
+                    .unwrap()
+                    .read()
+                    .unwrap()
+                    .display(&form.name)
+                    .0,
+            )
         } else {
             res.finish()
         }
@@ -549,16 +610,14 @@ pub async fn post_group(
 }
 
 fn api_error<T>(htmx: &Htmx, cause: T, status: StatusCode) -> HttpResponse
-where T: Debug + Display
+where
+    T: Debug + Display,
 {
     if htmx.is_htmx {
         htmx.retarget("#error".to_string());
         htmx.reswap(SwapType::InnerHtml);
     }
-    InternalError::new(
-        cause,
-        if htmx.is_htmx { StatusCode::OK } else { status }
-    ).error_response()
+    InternalError::new(cause, if htmx.is_htmx { StatusCode::OK } else { status }).error_response()
 }
 
 pub async fn delete_group(
@@ -611,10 +670,7 @@ pub fn login_form(invalid: bool, return_uri: &str) -> Markup {
 
 const QUERY_REDIRECT: &str = "r";
 
-pub async fn logout(
-    req: HttpRequest,
-    session_user: SessionUser,
-) -> impl Responder {
+pub async fn logout(req: HttpRequest, session_user: SessionUser) -> impl Responder {
     let mut res = Redirect::to(
         req.headers()
             .get(REFERER)
@@ -673,10 +729,13 @@ pub async fn post_login(
     Ok(if from_htmx {
         HttpResponse::Ok().body(login_form(true, &return_uri).0)
     } else {
-        HttpResponse::Unauthorized().body(html! {
-            h1 { "Log in" }
-            (login_form(true, &return_uri))
-        }.0)
+        HttpResponse::Unauthorized().body(
+            html! {
+                h1 { "Log in" }
+                (login_form(true, &return_uri))
+            }
+            .0,
+        )
     })
 }
 

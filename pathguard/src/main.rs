@@ -1,24 +1,37 @@
 #![feature(rwlock_downgrade)]
 #![feature(impl_trait_in_assoc_type)]
 
+mod dashboard;
+mod error;
 mod models;
 mod proxy;
 mod templates;
-mod dashboard;
-mod error;
 
 use std::{env, path::PathBuf};
 
 use actix_htmx::HtmxMiddleware;
-use actix_session::{SessionMiddleware, storage::CookieSessionStore};
-use actix_web::{App, HttpResponse, HttpServer, cookie::Key, http::header::{CONTENT_TYPE, HeaderValue}, middleware::{self}, mime::TEXT_HTML_UTF_8, web};
+use actix_session::{storage::CookieSessionStore, SessionMiddleware};
+use actix_web::{
+    cookie::Key,
+    http::header::{HeaderValue, CONTENT_TYPE},
+    middleware::{self},
+    mime::TEXT_HTML_UTF_8,
+    web, App, HttpResponse, HttpServer,
+};
 use maud::html;
 use models::*;
 
 use clap::{Parser, Subcommand};
 use passwords::PasswordGenerator;
 
-use crate::{dashboard::{dashboard, delete_group, delete_rule, delete_user, get_groups, get_user, get_user_edit, get_user_groups, logout, patch_rule, patch_user, post_group, post_login, post_rule, post_user}, templates::page};
+use crate::{
+    dashboard::{
+        dashboard, delete_group, delete_rule, delete_user, get_groups, get_user, get_user_edit,
+        get_user_groups, logout, patch_rule, patch_user, post_group, post_login, post_rule,
+        post_user,
+    },
+    templates::page,
+};
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {

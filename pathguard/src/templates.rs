@@ -1,5 +1,5 @@
-use maud::{DOCTYPE, Markup, PreEscaped, html};
 use crate::{HTMX, MISSING_CSS, OVERRIDE_CSS, SCRIPT};
+use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 pub fn page(main: Markup) -> String {
     fancy_page(html! {}, main)

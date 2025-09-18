@@ -1,11 +1,20 @@
-use std::{fs::File, io, ops::{Deref, DerefMut}, path::Path};
+use std::{
+    fs::File,
+    io,
+    ops::{Deref, DerefMut},
+    path::Path,
+};
 
 use csv::Writer;
 use indexmap::IndexMap;
-use maud::{Markup, html};
-use serde::{Deserialize, Serialize, ser::SerializeStruct};
+use maud::{html, Markup};
+use serde::{ser::SerializeStruct, Deserialize, Serialize};
 
-use crate::{ARGS, GROUPS_ROUTE, dashboard::{PLUS, TRASH}, templates::{const_icon_button, icon_button}};
+use crate::{
+    dashboard::{PLUS, TRASH},
+    templates::{const_icon_button, icon_button},
+    ARGS, GROUPS_ROUTE,
+};
 
 pub type Rule = Option<bool>;
 
@@ -23,13 +32,14 @@ pub struct RuleData<N: AsRef<str>, Rule> {
 pub type OwnedRuleData = RuleData<Box<str>, Rule>;
 
 impl<N> Serialize for RuleData<N, Rule>
-where N: AsRef<str>,
+where
+    N: AsRef<str>,
 {
-
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer {
-        let mut s= serializer.serialize_struct("rule", 2)?;
+    where
+        S: serde::Serializer,
+    {
+        let mut s = serializer.serialize_struct("rule", 2)?;
         s.serialize_field("path", self.path.as_ref())?;
         s.serialize_field("rule", &self.rule)?;
         s.end()
@@ -57,21 +67,22 @@ impl DerefMut for Group {
 
 impl Group {
     pub fn allowed(&self, uri: &str) -> Option<bool> {
-        self
-            .iter()
-            .filter_map(|(path, rule)| rule.map(|allowed| uri
-                .starts_with(path)
-                .then_some(allowed))
-                .flatten())
+        self.iter()
+            .filter_map(|(path, rule)| {
+                rule.map(|allowed| uri.starts_with(path).then_some(allowed))
+                    .flatten()
+            })
             .last()
     }
 
     pub fn write(&self, path: &Path) -> io::Result<()> {
-        let mut writer = Writer::from_writer(File::options()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(path)?);
+        let mut writer = Writer::from_writer(
+            File::options()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(path)?,
+        );
         for (path, rule) in self.iter() {
             writer.serialize(RuleData { path, rule: *rule })?;
         }

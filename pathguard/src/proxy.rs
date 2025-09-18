@@ -1,16 +1,15 @@
-use actix_web::{HttpRequest, HttpResponse, web};
+use actix_web::{web, HttpRequest, HttpResponse};
 use awc::Client;
 
 use crate::error::Error;
 
-pub async fn proxy(
-    req: HttpRequest,
-    body: web::Bytes,
-) -> Result<HttpResponse, Error> {
+pub async fn proxy(req: HttpRequest, body: web::Bytes) -> Result<HttpResponse, Error> {
     // We want to pass redirect headers to the client, not follow them ourselves
     let client = Client::builder().disable_redirects().finish();
-    let forwarded_req = client
-        .request_from(format!("http://127.0.0.1:{}{}", 1313, req.uri()), req.head());
+    let forwarded_req = client.request_from(
+        format!("http://127.0.0.1:{}{}", 1313, req.uri()),
+        req.head(),
+    );
     let res = forwarded_req.send_body(body).await?;
     let mut client_res = {
         let mut builder = HttpResponse::build(res.status());

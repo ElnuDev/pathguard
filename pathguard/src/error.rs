@@ -1,6 +1,13 @@
-use std::{fmt::Display, ops::{Deref, DerefMut}};
+use std::{
+    fmt::Display,
+    ops::{Deref, DerefMut},
+};
 
-use actix_web::{HttpResponse, ResponseError, body::BoxBody, http::{StatusCode, header::ContentType}};
+use actix_web::{
+    body::BoxBody,
+    http::{header::ContentType, StatusCode},
+    HttpResponse, ResponseError,
+};
 use awc::error::SendRequestError;
 use maud::html;
 use thiserror::Error;
