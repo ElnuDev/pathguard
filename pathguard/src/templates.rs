@@ -82,10 +82,10 @@ macro_rules! const_icon_button {
 }
 pub(crate) use const_icon_button;
 
-pub fn icon_button(name: &str, attrs: &str, colorway: Option<&str>) -> Markup {
+pub fn icon_button(name: &str, attrs: &str, extra_classes: Option<&str>) -> Markup {
     html! {
         (PreEscaped(r#"<button class="iconbutton"#))
-        @if let Some(colorway) = colorway { " " (colorway) }
+        @if let Some(extra_classes) = extra_classes { " " (extra_classes) }
         (PreEscaped(r#"" "#))
         (PreEscaped(attrs))
         (PreEscaped(">"))

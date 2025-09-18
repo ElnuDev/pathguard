@@ -5,18 +5,20 @@ use awc::{cookie::Cookie, http::StatusCode};
 use chrono::{DateTime, Utc};
 use clap::Arg;
 use indexmap::{IndexMap, IndexSet};
-use maud::{Markup, html};
+use maud::{Markup, PreEscaped, html};
 use thiserror::Error;
 
 use secrecy::{ExposeSecret, SecretBox, SecretString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use csv;
 
-use crate::{ARGS, Args, LOGOUT_ROUTE, dashboard::{TRASH, login_form, user_groups}, error::Error, models::{Group, State, group::{self, DEFAULT_GROUP}, user}, templates::{icon_button, page}};
+use crate::{ARGS, Args, LOGOUT_ROUTE, USERS_ROUTE, dashboard::{CHECK, PENCIL_SQUARE, TRASH, X_MARK, groups_select, groups_select_ok, login_form, user_groups}, error::Error, models::{Group, State, group::{self, DEFAULT_GROUP}, user}, templates::{icon_button, page}};
 
 pub const ADMIN_USERNAME: &str = "admin";
 pub const ADMIN_DEFAULT_PASSWORD: &str = "password";
 
+// TODO: Flatten core attributes (password, groups)
+// to make dealing with forms easier
 #[derive(Debug, Deserialize)]
 pub struct User {
     pub password: SecretString,
@@ -46,6 +48,13 @@ impl ResponseError for UserValidationError {
             Self::GroupDoesNotExist { .. } => StatusCode::CONFLICT,
         }
     }
+}
+
+#[derive(Default)]
+pub enum UserDisplayMode<'a> {
+    #[default]
+    Normal,
+    Edit { state: &'a State }
 }
 
 impl User {
@@ -96,7 +105,74 @@ impl User {
         Ok(())
     }
 
-    pub fn display(&self, name: &str) -> Markup {
+    fn display_partial_with_encoded(&self, name: &str, mode: UserDisplayMode, name_encoded: &str) -> Markup {
+        html! {
+            dl {
+                @match mode {
+                    UserDisplayMode::Normal => {
+                        (icon_button(
+                            PENCIL_SQUARE,
+                            &format!(
+                                "hx-get=\"{dashboard}{USERS_ROUTE}/{name_encoded}/edit\" hx-target=\"closest dl\"",
+                                dashboard=ARGS.dashboard
+                            ),
+                            Some("info float:right")
+                        ))
+                        div {
+                            dt { "Password:" }
+                            dd.password.mono-font { (self.password.expose_secret()) }
+                        }
+                        @if name != ADMIN_USERNAME {
+                            div {
+                                dt { "Groups:" }
+                                (user_groups(name, self))
+                            }
+                        }
+                    },
+                    UserDisplayMode::Edit { state } => form
+                        hx-patch={ (ARGS.dashboard) (USERS_ROUTE) "/" (name_encoded) }
+                        hx-target="closest dl"
+                        hx-swap="outerHTML"
+                    {
+                        (icon_button(
+                            X_MARK,
+                            &format!(
+                                // type="button" prevents this from acting like form submit and losing work
+                                "type=\"button\" hx-get=\"{dashboard}{USERS_ROUTE}/{name_encoded}\" hx-target=\"closest dl\" hx-swap=\"outerHTML\" style=\"margin-left: 0.5em\"",
+                                dashboard=ARGS.dashboard
+                            ),
+                            Some("bad float:right")
+                        ))
+                        (icon_button(CHECK, "", Some("ok float:right")))
+                        div {
+                            dt { "Password:" }
+                            dd { input type="text" name="password" value=(self.password.expose_secret()) placeholder="password" required; }
+                        }
+                        @if name != ADMIN_USERNAME {
+                            div {
+                                dt { "Groups:" }
+                                dd { (groups_select(state.groups.read(), Some(self))) }
+                            }
+                        }
+                    }
+                }
+                div {
+                    dt { "Created:" }
+                    dd { (self.created) }
+                }
+                div {
+                    dt { "Last active:" }
+                    dd { @if let Some(when) = self.last_active { (when) } @else { "Never" } }
+                }
+            }
+        }
+    }
+
+    pub fn display_partial(&self, name: &str, mode: UserDisplayMode) -> Markup {
+        self.display_partial_with_encoded(name, mode, &urlencoding::encode(name))
+    }
+
+    pub fn display(&self, name: &str, mode: UserDisplayMode) -> Markup {
         html! {
             div {
                 @let name_encoded = urlencoding::encode(name);
@@ -112,26 +188,7 @@ impl User {
                 div {
                     details {
                         summary { (name) }
-                        dl {
-                            div {
-                                dt { "Password:" }
-                                dd.password.mono-font { (self.password.expose_secret()) }
-                            }
-                            @if name != ADMIN_USERNAME {
-                                div {
-                                    dt { "Groups:" }
-                                    (user_groups(name, self))
-                                }
-                            }
-                            div {
-                                dt { "Created:" }
-                                dd { (self.created) }
-                            }
-                            div {
-                                dt { "Last active:" }
-                                dd { @if let Some(when) = self.last_active { (when) } @else { "Never" } }
-                            }
-                        }
+                        (self.display_partial_with_encoded(name, mode, &name_encoded))
                     }
                 }
             }

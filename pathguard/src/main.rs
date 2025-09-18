@@ -1,4 +1,5 @@
 #![feature(rwlock_downgrade)]
+#![feature(impl_trait_in_assoc_type)]
 
 mod models;
 mod proxy;
@@ -18,7 +19,7 @@ use models::*;
 use clap::{Parser, Subcommand};
 use passwords::PasswordGenerator;
 
-use crate::{dashboard::{dashboard, delete_group, delete_rule, delete_user, get_groups, get_user_groups, logout, patch_rule, post_group, post_login, post_rule, post_user}, templates::page};
+use crate::{dashboard::{dashboard, delete_group, delete_rule, delete_user, get_groups, get_user, get_user_edit, get_user_groups, logout, patch_rule, patch_user, post_group, post_login, post_rule, post_user}, models::user::SessionUser, templates::page};
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
@@ -107,7 +108,11 @@ async fn main() -> std::io::Result<()> {
             .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE)
                 .post(post_user))
             .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}")
+                .get(get_user)
+                .patch(patch_user)
                 .delete(delete_user))
+            .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}/edit")
+                .get(get_user_edit))
             .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}/groups")
                 .get(get_user_groups))
             .service(web::resource(ARGS.dashboard.to_string() + "/{tail:.*}").get(async ||

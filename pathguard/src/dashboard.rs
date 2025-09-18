@@ -1,11 +1,11 @@
 use std::{
-    borrow::Cow, convert::Infallible, fmt::{Debug, Display}, future::Ready, ops::Deref, sync::RwLock
+    borrow::Cow, convert::Infallible, default, fmt::{Debug, Display}, future::{Future, Ready, ready}, ops::Deref, path, sync::RwLock
 };
 
 use crate::{
     ARGS, Args, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE, error::{self, BasicError, Error}, models::{
         Group, State, User, group::{self, DEFAULT_GROUP, RULE_NA, RULE_ON, Rule}, state::{AddGroupError, UpdateGroupError, UpdateStateError}, user::{
-            self, ADMIN_USERNAME, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE, UserValidationError
+            self, ADMIN_USERNAME, PASSWORD_COOKIE, SessionUser, USERNAME_COOKIE, UserDisplayMode, UserValidationError
         }
     }, templates::{const_icon_button, fancy_page, page}
 };
@@ -14,19 +14,30 @@ use actix_web::{
     FromRequest, HttpRequest, HttpResponse, Responder, ResponseError, cookie::Cookie, dev::Url, error::{ErrorBadRequest, ErrorInternalServerError, ErrorNotFound, ErrorUnauthorized, InternalError}, get, http::header::{HeaderName, HeaderValue, REFERER}, web::{self, Redirect, head}
 };
 use awc::{cookie::time::format_description::modifier::WeekNumberRepr, http::StatusCode};
+use chrono::OutOfRange;
 use clap::builder::Str;
 use indexmap::{IndexMap, IndexSet};
 use maud::{html, Markup, PreEscaped};
-use qstring;
+use qstring::{self, QString};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer};
 use thiserror::Error;
+use webformd::{WebFomData, WebformDeserialize};
 
 const TRASH_: &str = "trash";
 pub const TRASH: &str = TRASH_;
 
 const PLUS_: &str = "plus";
 pub const PLUS: &str = PLUS_;
+
+const PENCIL_SQUARE_: &str = "pencil-square";
+pub const PENCIL_SQUARE: &str = PENCIL_SQUARE_;
+
+const CHECK_: &str = "check";
+pub const CHECK: &str = CHECK_;
+
+const X_MARK_: &str = "x-mark";
+pub const X_MARK: &str = X_MARK_;
 
 pub async fn dashboard(
     req: HttpRequest,
@@ -59,6 +70,15 @@ pub async fn dashboard(
             symbol #(PLUS_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
                 (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />"#))
             }
+            symbol #(PENCIL_SQUARE_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />"#))
+            }
+            symbol #(CHECK_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />"#))
+            }
+            symbol #(X_MARK_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />"#))
+            }
         }
         h1 { "Dashboard" }
         h2 #groups { "Groups" }
@@ -77,7 +97,7 @@ pub async fn dashboard(
         p { label style="user-select: none" { "Show passwords? " input #show-passwords type="checkbox" autocomplete="off"; } }
         .table.rows {
             @for (user_name, user) in state.users.read().or(Err(Error::InternalServer))?.iter() {
-                (user.display(user_name))
+                (user.display(user_name, UserDisplayMode::Normal))
             }
             (new_user_form_ok(false, &groups))
         }
@@ -148,11 +168,11 @@ pub fn user_groups(name: &str, user: &User) -> Markup {
     }
 }
 
-fn groups_select_ok(groups: &IndexMap<String, RwLock<Group>>, user: Option<&User>) -> Markup {
+pub fn groups_select_ok(groups: &IndexMap<String, RwLock<Group>>, user: Option<&User>) -> Markup {
     groups_select(Result::<&IndexMap<String, RwLock<Group>>, Infallible>::Ok(groups), user)
 }
 
-fn groups_select<E: Display>(groups: Result<impl Deref<Target = IndexMap<String, RwLock<Group>>>, E>, user: Option<&User>) -> Markup {
+pub fn groups_select<E: Display>(groups: Result<impl Deref<Target = IndexMap<String, RwLock<Group>>>, E>, user: Option<&User>) -> Markup {
     match groups {
         Ok(groups) => html! {
             select hx-trigger="groups from:body" hx-get={ (ARGS.dashboard) (GROUPS_ROUTE) } name="groups" multiple {
@@ -199,32 +219,62 @@ impl ResponseError for AddUserError {
     }
 }
 
+// webformd can't deserialize Box<str> or IndexSet<Box<str>> directly
+// TODO: maybe open a PR?
+#[derive(WebformDeserialize)]
+pub struct UserFormRaw {
+    password: String,
+    groups: Vec<String>,
+}
+
+pub struct UserFormParsed {
+    password: SecretString,
+    groups: IndexSet<Box<str>>,
+}
+
+impl Into<UserFormParsed> for UserFormRaw {
+    fn into(self) -> UserFormParsed {
+        UserFormParsed {
+            password: SecretString::new(self.password.into_boxed_str()),
+            groups: IndexSet::from_iter(self.groups.into_iter().map(|str| str.into_boxed_str())),
+        }
+    }
+}
+
+impl Into<User> for UserFormParsed {
+    fn into(self) -> User {
+        User::new(self.password, self.groups)
+    }
+}
+
+impl Into<User> for UserFormRaw {
+    fn into(self) -> User {
+        let parsed: UserFormParsed = self.into();
+        parsed.into()
+    }
+}
+
 pub async fn post_user(
     state: web::Data<State>,
     htmx: Htmx,
-    web::Form(query): web::Form<Vec<(String, String)>>,
+    web::Form(form): web::Form<Vec<(String, String)>>,
     session_user: SessionUser,
 ) -> Result<HttpResponse, AddUserError> {
     use AddUserError::*;
     if let Some(res) = session_user.authorization_admin_basic(&state) {
         return Ok(res);
     }
-    let Some((name, user)) = (|| -> Option<(Box<str>, User)> {
-        let mut name = None;
-        let mut password = None;
-        let mut groups = IndexSet::new();
-        for (key, value) in query {
-            match key.as_str() {
-                "name" => name = Some(value.into_boxed_str()),
-                "password" => password = Some(SecretString::from(value)),
-                "groups" => { groups.insert(value.into_boxed_str()); },
-                _ => {}
-            }
-        }
-        Some((name?, User::new(password?, groups)))
-    })() else {
-        return Ok(ErrorBadRequest("missing field(s)").error_response())
+    let user: User = match UserFormRaw::deserialize(&form) {
+        Ok(form) => form.into(),
+        Err(err) => return Ok(ErrorBadRequest(err).error_response()),
     };
+    let Some(name) = form
+        .into_iter()
+        .filter(|(key, _value)| key.as_str() == "name")
+        .map(|(_key, value)| value.into_boxed_str())
+        .next() else {
+            return Ok(ErrorBadRequest("missing username field").error_response());
+        };
     state.update_users(|users| {
         if users.contains_key(&name) {
             return Err(AlreadyExists);
@@ -233,7 +283,7 @@ pub async fn post_user(
         let mut res = HttpResponse::Ok();
         let res = if htmx.is_htmx {
             res.body(html! {
-                (user.display(&name))
+                (user.display(&name, UserDisplayMode::Normal))
                 (new_user_form(true, state.groups.read()))
             }.0)
         } else {
@@ -242,6 +292,74 @@ pub async fn post_user(
         users.insert(name, user);
         Ok(res)
     })?
+}
+
+pub fn get_user_generic(edit: bool) -> impl AsyncFn(web::Data<State>, web::Path<String>, SessionUser) -> Result<HttpResponse, BasicError> {
+    async move |
+        state: web::Data<State>,
+        path: web::Path<String>,
+        session_user: SessionUser,
+    | -> Result<HttpResponse, BasicError> {
+        if let Some(res) = session_user.authorization_admin_basic(&state) {
+            return Ok(res);
+        }
+        let name = path.into_inner();
+        let lock = state.users.read().or(Err(Error::InternalServer))?;
+        let Some(user) = lock.get(&*name)  else {
+            return Ok(ErrorNotFound("That user doesn't exist").error_response());
+        };
+        Ok(HttpResponse::Ok().body(user.display_partial(&name, if edit {
+            UserDisplayMode::Edit { state: &state }
+        } else {
+            UserDisplayMode::Normal
+        }).0))
+    }
+}
+
+pub async fn get_user(
+    state: web::Data<State>,
+    path: web::Path<String>,
+    session_user: SessionUser,
+) -> Result<HttpResponse, BasicError> {
+    get_user_generic(false)(state, path, session_user).await
+}
+
+pub async fn get_user_edit(
+    state: web::Data<State>,
+    path: web::Path<String>,
+    session_user: SessionUser,
+) -> Result<HttpResponse, BasicError> {
+    get_user_generic(true)(state, path, session_user).await
+}
+
+pub async fn patch_user(
+    state: web::Data<State>,
+    htmx: Htmx,
+    web::Form(form): web::Form<Vec<(String, String)>>,
+    path: web::Path<String>,
+    session_user: SessionUser,
+) -> Result<HttpResponse, UpdateStateError> {
+    if let Some(res) = session_user.authorization_admin_basic(&state) {
+        return Ok(res);
+    }
+    let name = path.into_inner();
+    let UserFormParsed { password, groups } = match UserFormRaw::deserialize(&form) {
+        Ok(form) => form.into(),
+        Err(err) => return Ok(ErrorBadRequest(err).error_response()),
+    };
+    state.update_users(|users| {
+        let Some(user) = users.get_mut(&*name) else {
+            return ErrorNotFound("that user doesn't exist").error_response();
+        };
+        user.password = password;
+        user.groups = groups;
+        let mut res = HttpResponse::Ok();
+        if htmx.is_htmx {
+            res.body(user.display_partial(&name, UserDisplayMode::Normal).0)
+        } else {
+            res.finish()
+        }
+    })
 }
 
 pub async fn delete_user(
@@ -254,7 +372,7 @@ pub async fn delete_user(
     }
     let name = path.into_inner();
     if state.update_users(|users| users.shift_remove(&*name).is_none())? {
-        return Ok(ErrorNotFound("That user doesn't exist").error_response());
+        return Ok(ErrorNotFound("that user doesn't exist").error_response());
     }
     Ok(HttpResponse::Ok().finish())
 }
