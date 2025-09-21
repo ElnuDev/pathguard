@@ -48,7 +48,9 @@ Some utility commands:
             extensions = [ "rust-src" ];
           })
           cargo-edit
+          cargo-shear
           bacon
+          diesel-cli
         ];
         inputsFrom = with self.packages.${system}; [ pathguard ];
       };

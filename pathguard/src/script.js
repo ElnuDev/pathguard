@@ -37,6 +37,11 @@ function makeModal() {
 document.addEventListener("DOMContentLoaded", _event => {
     document.body.addEventListener('htmx:beforeSwap', event => {
         if (!event.detail.isError) return;
+        if (event.detail.boosted) {
+            event.detail.shouldSwap = true;
+            event.detail.isError = false;
+            return;
+        }
         makeModal();
         modalTitleBar.innerHTML = `Error: ${event.detail.xhr.status} ${event.detail.xhr.statusText}`;
         modal.classList.toggle("bad", true);

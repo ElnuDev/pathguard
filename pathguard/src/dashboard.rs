@@ -1,39 +1,27 @@
 use std::{
     borrow::Cow,
     convert::Infallible,
-    fmt::{Debug, Display},
+    fmt::Debug,
     future::Ready,
     ops::Deref,
-    sync::RwLock,
 };
 
 use crate::{
-    error::{BasicError, Error},
-    models::{
-        group::{self, Rule, DEFAULT_GROUP},
-        state::{AddGroupError, UpdateGroupError, UpdateStateError},
-        user::{
-            SessionUser, UserDisplayMode, UserValidationError, ADMIN_USERNAME, PASSWORD_COOKIE,
-            USERNAME_COOKIE,
-        },
-        Group, State, User,
-    },
-    templates::{const_icon_button, fancy_page},
-    ARGS, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE,
+    ARGS, DATABASE, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE, auth::{AuthorizedAdmin, Fancy, PASSWORD_COOKIE, USERNAME_COOKIE, log_out}, database::{self, DatabaseError}, models::{
+        Activity, Group, User, group::{self, DEFAULT_GROUP, Rule}, user::{
+            ADMIN_USERNAME, UserDisplayMode, UserRenderContext, UserWithGroups
+        }
+    }, templates::{const_icon_button, fancy_page}
 };
-use actix_htmx::{Htmx, SwapType};
+use actix_htmx::Htmx;
 use actix_web::{
-    cookie::Cookie,
-    error::{ErrorBadRequest, ErrorNotFound, InternalError},
-    http::header::{HeaderName, HeaderValue, REFERER},
-    web::{self, Redirect},
-    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError,
+    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError, error::{ErrorBadRequest, ErrorForbidden, ErrorNotFound}, http::header::REFERER, web::{self, Redirect}
 };
 use awc::http::StatusCode;
-use indexmap::{IndexMap, IndexSet};
-use maud::{html, Markup, PreEscaped};
+use diesel::{dsl::{delete, exists, insert_into, max}, prelude::*, r2d2::ConnectionManager, select, update};
+use maud::{Markup, PreEscaped, Render, html};
 use qstring::{self};
-use secrecy::{ExposeSecret, SecretString};
+use r2d2::PooledConnection;
 use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 use webformd::{WebFomData, WebformDeserialize};
@@ -54,14 +42,9 @@ const X_MARK_: &str = "x-mark";
 pub const X_MARK: &str = X_MARK_;
 
 pub async fn dashboard(
-    req: HttpRequest,
-    session_user: SessionUser,
-    state: web::Data<State>,
-) -> Result<HttpResponse, Error> {
-    if let Some(res) = session_user.authorization_admin_fancy(&state, &req) {
-        return Ok(res);
-    }
-
+    _auth: Fancy<AuthorizedAdmin>,
+) -> database::Result<HttpResponse> {
+    const ACTIVITY_LIMIT: i64 = 100;
     Ok(HttpResponse::Ok().body(fancy_page(html! {
         header.navbar {
             nav {
@@ -69,6 +52,7 @@ pub async fn dashboard(
                     li { a.allcaps href="#" { "pathguard" } }
                     li { a href="#groups" { "Groups" } }
                     li { a href="#users" { "Users" } }
+                    li { a href="#activity" { "Activity" } }
                 }
             }
             nav style="margin-left: auto" {
@@ -96,11 +80,10 @@ pub async fn dashboard(
         }
         h1 { "Dashboard" }
         h2 #groups { "Groups" }
-        @let groups = state.groups.read().or(Err(Error::InternalServer))?;
+        @let groups = DATABASE.groups()?;
         .table.rows {
-            @for (group_name, group) in groups.iter() {
-                @let group = group.read().or(Err(Error::InternalServer))?;
-                (group.display(group_name))
+            @for group in groups.iter() {
+                (group.display()?)
             }
             form hx-post={ (ARGS.dashboard) (GROUPS_ROUTE) } hx-swap="beforebegin" hx-on::after-request="this.querySelector('input').value = ''" {
                 div { (const_icon_button!(PLUS, "", "ok")) }
@@ -110,25 +93,49 @@ pub async fn dashboard(
         h2 #users { "Users" }
         p { label style="user-select: none" { "Show passwords? " input #show-passwords type="checkbox" autocomplete="off"; } }
         .table.rows {
-            @for (user_name, user) in state.users.read().or(Err(Error::InternalServer))?.iter() {
-                (user.display(user_name, UserDisplayMode::Normal))
+            @for user in DATABASE.users()? {
+                @let user: UserWithGroups = user.try_into()?;
+                (user.display(UserRenderContext {
+                    mode: UserDisplayMode::Normal,
+                    last_active: user.last_active()?,
+                }))
             }
-            (new_user_form_ok(false, &groups))
+            (new_user_form(false, &groups))
+        }
+        h2 #activity { "Activity" }
+        p { "Only showing latest " (ACTIVITY_LIMIT) " activity items." }
+        @let activities = DATABASE.run(|conn| {
+            use crate::schema::activities::dsl;
+            dsl::activities
+                .select(Activity::as_select())
+                .order(dsl::id.desc())
+                .limit(ACTIVITY_LIMIT)
+                .get_results(conn)
+        })?;
+        table style="width: 100%" {
+            thead {
+                tr {
+                    th scope="col" { "User" }
+                    th scope="col" { "IP" }
+                    th scope="col" { "Path" }
+                    th scope="col" { "Timestamp (UTC)" }
+                }
+            }
+            tbody {
+                @for activity in activities {
+                    tr.bg[!activity.allowed].color[!activity.allowed].bad[!activity.allowed] {
+                        td { @if let Some(user) = activity.user { a href={ "#" (user) } { (user) } } }
+                        td { (activity.ip.deref()) }
+                        td { (activity.path) }
+                        td { (activity.timestamp) }
+                    }
+                }
+            }
         }
     })))
 }
 
-fn new_user_form_ok(autofocus: bool, groups: &IndexMap<String, RwLock<Group>>) -> Markup {
-    new_user_form(
-        autofocus,
-        Result::<&IndexMap<String, RwLock<Group>>, Infallible>::Ok(groups),
-    )
-}
-
-fn new_user_form<E: Display>(
-    autofocus: bool,
-    groups: Result<impl Deref<Target = IndexMap<String, RwLock<Group>>>, E>,
-) -> Markup {
+fn new_user_form(autofocus: bool, groups: &Vec<Group>) -> Markup {
     html! {
         form
             autocomplete="off"
@@ -153,75 +160,37 @@ fn new_user_form<E: Display>(
 }
 
 pub async fn get_groups(
-    state: web::Data<State>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, BasicError> {
-    if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return Ok(res);
-    }
-    Ok(HttpResponse::Ok().body(groups_select(state.groups.read(), None).0))
+    _auth: AuthorizedAdmin,
+) -> Result<HttpResponse, DatabaseError> {
+    Ok(HttpResponse::Ok().body(groups_select(&DATABASE.groups()?, None)))
 }
 
 pub async fn get_user_groups(
-    state: web::Data<State>,
+    _auth: AuthorizedAdmin,
     path: web::Path<String>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, Error> {
-    if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return Ok(res);
-    }
-    let user_name = path.into_inner();
-    let lock = state.users.read().or(Err(Error::InternalServer))?;
-    let Some(user) = lock.get(&*user_name) else {
+) -> Result<HttpResponse, DatabaseError> {
+    let username = path.into_inner();
+    let Some(user) = DATABASE.user(&username)? else {
         return Ok(HttpResponse::NotFound().finish());
     };
-    Ok(HttpResponse::Ok().body(user_groups(&user_name, user).0))
+    let user: UserWithGroups = user.try_into()?;
+    Ok(HttpResponse::Ok().body(user.display_groups()))
 }
 
-pub fn user_groups(name: &str, user: &User) -> Markup {
-    html! {
-        dd hx-trigger="groupsDeleted from:body" hx-swap="outerHTML" hx-get={ (ARGS.dashboard) (USERS_ROUTE) "/" (name) "/groups" } {
-            @if user.groups.is_empty() { em { "None" } } @else {
-                @for (i, group_name) in user.groups.iter().enumerate() {
-                    @if i != 0 { ", " }
-                    a href={ "#" (Group::id(group_name)) } { (group_name)};
-                }
-            }
-        }
-    }
-}
-
-pub fn groups_select_ok(groups: &IndexMap<String, RwLock<Group>>, user: Option<&User>) -> Markup {
-    groups_select(
-        Result::<&IndexMap<String, RwLock<Group>>, Infallible>::Ok(groups),
-        user,
-    )
-}
-
-pub fn groups_select<E: Display>(
-    groups: Result<impl Deref<Target = IndexMap<String, RwLock<Group>>>, E>,
-    user: Option<&User>,
+pub fn groups_select(
+    groups: &Vec<Group>,
+    user: Option<&UserWithGroups>,
 ) -> Markup {
-    match groups {
-        Ok(groups) => html! {
-            select hx-trigger="groups from:body" hx-get={ (ARGS.dashboard) (GROUPS_ROUTE) } name="groups" multiple {
-                @for group_name in groups.keys() {
-                    @if group_name != DEFAULT_GROUP {
-                        option
-                            value=(group_name)
-                            selected[user
-                                .map(|user| user.groups.contains(group_name.deref()))
-                                .unwrap_or_default()]
-                        { (group_name) }
-                    }
-                }
-            }
-        },
-        Err(err) => {
-            log::error!("{err}");
-            html! {
-                div hx-trigger="groups from:body" {
-                    "Something went wrong fetching group list."
+    html! {
+        select hx-trigger="groups from:body" hx-get={ (ARGS.dashboard) (GROUPS_ROUTE) } name="groups" multiple {
+            @for group in groups {
+                @if group.name != DEFAULT_GROUP {
+                    option
+                        value=(group.name)
+                        selected[user
+                            .map(|user| user.groups.contains(&group.name))
+                            .unwrap_or_default()]
+                    { (group.name) }
                 }
             }
         }
@@ -229,20 +198,52 @@ pub fn groups_select<E: Display>(
 }
 
 #[derive(Error, Debug)]
-pub enum AddUserError {
-    #[error("{0}")]
-    UpdateState(#[from] UpdateStateError),
-    #[error("That user already exists")]
-    AlreadyExists,
-    #[error("{0}")]
-    Validation(#[from] UserValidationError),
+pub enum PasswordValidationError {
+    #[error("password strength must be at least {min}/100, provided password strength was only {strength:.1}")]
+    WeakPassword { strength: f64, min: f64 },
+    #[error("\"{0}\" is a common password and shouldn't be used")]
+    CommonPassword(Box<str>),
 }
 
-impl ResponseError for AddUserError {
+impl ResponseError for PasswordValidationError {
+    fn status_code(&self) -> StatusCode {
+        StatusCode::UNPROCESSABLE_ENTITY
+    }
+}
+
+pub fn validate_password(password: &str) -> Result<(), PasswordValidationError> {
+    use PasswordValidationError::*;
+
+    let analyzed = passwords::analyzer::analyze(password);
+    if analyzed.is_common() {
+        return Err(CommonPassword(
+            password.to_string().into_boxed_str(),
+        ));
+    }
+
+    let strength = passwords::scorer::score(&analyzed);
+    if strength < ARGS.min_password_strength {
+        return Err(WeakPassword {
+            strength,
+            min: ARGS.min_password_strength,
+        });
+    }
+
+    Ok(())
+}
+
+#[derive(Error, Debug)]
+pub enum UserError {
+    #[error("{0}")]
+    Database(#[from] DatabaseError),
+    #[error("{0}")]
+    Validation(#[from] PasswordValidationError),
+}
+
+impl ResponseError for UserError {
     fn status_code(&self) -> StatusCode {
         match self {
-            Self::UpdateState(err) => err.status_code(),
-            Self::AlreadyExists => StatusCode::CONFLICT,
+            Self::Database(err) => err.status_code(),
             Self::Validation(err) => err.status_code(),
         }
     }
@@ -251,176 +252,176 @@ impl ResponseError for AddUserError {
 // webformd can't deserialize Box<str> or IndexSet<Box<str>> directly
 // TODO: maybe open a PR?
 #[derive(WebformDeserialize)]
-pub struct UserFormRaw {
+pub struct UserForm {
     password: String,
     groups: Vec<String>,
 }
 
-pub struct UserFormParsed {
-    password: SecretString,
-    groups: IndexSet<Box<str>>,
-}
-
-impl Into<UserFormParsed> for UserFormRaw {
-    fn into(self) -> UserFormParsed {
-        UserFormParsed {
-            password: SecretString::new(self.password.into_boxed_str()),
-            groups: IndexSet::from_iter(self.groups.into_iter().map(|str| str.into_boxed_str())),
-        }
+fn add_groups<'a>(
+    conn: &mut PooledConnection<ConnectionManager<SqliteConnection>>,
+    username: &str,
+    groups: impl Iterator<Item = &'a String>,
+) -> QueryResult<()> {
+    let mut add_group = |group| {
+        use crate::schema::user_groups::dsl;
+        insert_into(dsl::user_groups)
+            .values((dsl::user.eq(username), dsl::group.eq(group)))
+            .execute(conn)
+    };
+    add_group(DEFAULT_GROUP)?;
+    for group in groups.filter(|group| *group != DEFAULT_GROUP) {
+        add_group(group)?;
     }
-}
-
-impl Into<User> for UserFormParsed {
-    fn into(self) -> User {
-        User::new(self.password, self.groups)
-    }
-}
-
-impl Into<User> for UserFormRaw {
-    fn into(self) -> User {
-        let parsed: UserFormParsed = self.into();
-        parsed.into()
-    }
+    Ok(())
 }
 
 pub async fn post_user(
-    state: web::Data<State>,
+    _auth: AuthorizedAdmin,
     htmx: Htmx,
     web::Form(form): web::Form<Vec<(String, String)>>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, AddUserError> {
-    use AddUserError::*;
-    if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return Ok(res);
-    }
-    let user: User = match UserFormRaw::deserialize(&form) {
-        Ok(form) => form.into(),
+) -> Result<HttpResponse, UserError> {
+    let user_form = match UserForm::deserialize(&form) {
+        Ok(form) => form,
         Err(err) => return Ok(ErrorBadRequest(err).error_response()),
     };
     let Some(name) = form
         .into_iter()
         .filter(|(key, _value)| key.as_str() == "name")
-        .map(|(_key, value)| value.into_boxed_str())
+        .map(|(_key, value)| value)
         .next()
     else {
         return Ok(ErrorBadRequest("missing username field").error_response());
     };
-    state.update_users(|users| {
-        if users.contains_key(&name) {
-            return Err(AlreadyExists);
-        }
-        user.validate(
-            &*state
-                .groups
-                .read()
-                .or(Err(UpdateState(UpdateStateError::Poison)))?,
-        )?;
-        let mut res = HttpResponse::Ok();
-        let res = if htmx.is_htmx {
-            res.body(
-                html! {
-                    (user.display(&name, UserDisplayMode::Normal))
-                    (new_user_form(true, state.groups.read()))
-                }
-                .0,
-            )
-        } else {
-            res.finish()
-        };
-        users.insert(name, user);
-        Ok(res)
-    })?
+    validate_password(&user_form.password)?;
+    let mut groups = user_form.groups;
+    groups.insert(0, DEFAULT_GROUP.to_string());
+    let user = User::new(name, user_form.password).with_groups(groups);
+
+    DATABASE.run(|conn| {
+        conn.transaction(|conn| {
+            use crate::schema::users::dsl;
+            insert_into(dsl::users)
+                .values(user.deref())
+                .execute(conn)?;
+            add_groups(conn, &user.name, user.groups.iter())?;
+            Ok(())
+        })
+    })?;
+
+    let mut res = HttpResponse::Ok();
+    Ok(if htmx.is_htmx {
+        res.body(html! {
+            (user.display(UserRenderContext {
+                mode: UserDisplayMode::Normal,
+                last_active: None,
+            }))
+            (new_user_form(true, &DATABASE.groups()?))
+        })
+    } else {
+        res.finish()
+    })
 }
 
 pub fn get_user_generic(
     edit: bool,
-) -> impl AsyncFn(web::Data<State>, web::Path<String>, SessionUser) -> Result<HttpResponse, BasicError>
+) -> impl AsyncFn(AuthorizedAdmin, web::Path<String>) -> database::Result<HttpResponse>
 {
-    async move |state: web::Data<State>,
-                path: web::Path<String>,
-                session_user: SessionUser|
-                -> Result<HttpResponse, BasicError> {
-        if let Some(res) = session_user.authorization_admin_basic(&state) {
-            return Ok(res);
-        }
-        let name = path.into_inner();
-        let lock = state.users.read().or(Err(Error::InternalServer))?;
-        let Some(user) = lock.get(&*name) else {
+    async move |_auth: AuthorizedAdmin,
+                path: web::Path<String>|
+                -> database::Result<HttpResponse> {
+        let username = path.into_inner();
+        let Some(user) = DATABASE.user(&username)? else {
             return Ok(ErrorNotFound("That user doesn't exist").error_response());
         };
+        let user: UserWithGroups = user.try_into()?;
+        let global_groups = if edit { Some(DATABASE.groups()?) } else { None };
+        let mode = global_groups
+            .as_ref()
+            .map(|global_groups| UserDisplayMode::Edit { global_groups })
+            .unwrap_or_default();
         Ok(HttpResponse::Ok().body(
-            user.display_partial(
-                &name,
-                if edit {
-                    UserDisplayMode::Edit { state: &state }
-                } else {
-                    UserDisplayMode::Normal
-                },
-            )
-            .0,
+            user.display_partial(UserRenderContext {
+                mode,
+                last_active: user.last_active()?,
+            })
         ))
     }
 }
 
 pub async fn get_user(
-    state: web::Data<State>,
+    auth: AuthorizedAdmin,
     path: web::Path<String>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, BasicError> {
-    get_user_generic(false)(state, path, session_user).await
+) -> database::Result<HttpResponse> {
+    get_user_generic(false)(auth, path).await
 }
 
 pub async fn get_user_edit(
-    state: web::Data<State>,
+    auth: AuthorizedAdmin,
     path: web::Path<String>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, BasicError> {
-    get_user_generic(true)(state, path, session_user).await
+) -> database::Result<HttpResponse> {
+    get_user_generic(true)(auth, path).await
 }
 
 pub async fn patch_user(
-    state: web::Data<State>,
+    _auth: AuthorizedAdmin,
     htmx: Htmx,
     web::Form(form): web::Form<Vec<(String, String)>>,
     path: web::Path<String>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, UpdateStateError> {
-    if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return Ok(res);
-    }
-    let name = path.into_inner();
-    let UserFormParsed { password, groups } = match UserFormRaw::deserialize(&form) {
+) -> Result<HttpResponse, UserError> {
+    let UserForm { password, mut groups } = match UserForm::deserialize(&form) {
         Ok(form) => form.into(),
         Err(err) => return Ok(ErrorBadRequest(err).error_response()),
     };
-    state.update_users(|users| {
-        let Some(user) = users.get_mut(&*name) else {
-            return ErrorNotFound("that user doesn't exist").error_response();
+    let name = path.into_inner();
+    validate_password(&password)?;
+    groups.insert(0, DEFAULT_GROUP.to_string());
+
+    // We want to give back 404 Not Found instead of 409 Conflict
+    // if the given user doesn't exist. SQLite doesn't support reporting back
+    // which foreign key violation there was (nonexistent user vs group),
+    // so we have to make sure manually.
+    if let Some(res) = DATABASE.run(|conn| {
+        let user_exists: bool = {
+            use crate::schema::users::dsl;
+            select(exists(dsl::users.filter(dsl::name.eq(&name)))).get_result(conn)?
         };
-        user.password = password;
-        user.groups = groups;
-        let mut res = HttpResponse::Ok();
-        if htmx.is_htmx {
-            res.body(user.display_partial(&name, UserDisplayMode::Normal).0)
-        } else {
-            res.finish()
+        if !user_exists {
+            return Ok(Some(ErrorNotFound("that user doesn't exist").error_response()))
         }
+        conn.transaction(|conn| -> Result<(), diesel::result::Error> {
+            use crate::schema::user_groups::dsl;
+            delete(dsl::user_groups.filter(dsl::user.eq(&name))).execute(conn)?;
+            add_groups(conn, &name, groups.iter())?;
+            Ok(())
+        })?;
+        Ok(None)
+    })? { return Ok(res); }
+    let user = User::new(name, password).with_groups(groups);
+
+    let mut res = HttpResponse::Ok();
+    Ok(if htmx.is_htmx {
+        res.body(user.display_partial(UserRenderContext {
+            mode: UserDisplayMode::Normal,
+            last_active: user.last_active()?,
+        }))
+    } else {
+        res.finish()
     })
 }
 
 pub async fn delete_user(
-    state: web::Data<State>,
+    _auth: AuthorizedAdmin,
     path: web::Path<String>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, UpdateStateError> {
-    if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return Ok(res);
-    }
+) -> database::Result<HttpResponse> {
     let name = path.into_inner();
-    if state.update_users(|users| users.shift_remove(&*name).is_none())? {
-        return Ok(ErrorNotFound("that user doesn't exist").error_response());
-    }
-    Ok(HttpResponse::Ok().finish())
+    Ok(if DATABASE.run(|conn| {
+        use crate::schema::users::dsl;
+        delete(dsl::users.filter(dsl::name.eq(&name))).execute(conn)
+    })? == 0 {
+        ErrorNotFound("that user doesn't exist").error_response()
+    } else {
+        HttpResponse::Ok().finish()
+    })
 }
 
 #[derive(Deserialize)]
@@ -428,99 +429,65 @@ pub struct NewRule {
     name: String,
 }
 
-#[derive(Error, Debug)]
-pub enum AddRuleError {
-    #[error("{0}")]
-    UpdateGroup(#[from] UpdateGroupError),
-    #[error("That rule already exists")]
-    AlreadyExists,
-}
-
-impl ResponseError for AddRuleError {
-    fn status_code(&self) -> StatusCode {
-        match self {
-            Self::UpdateGroup(err) => err.status_code(),
-            Self::AlreadyExists => StatusCode::CONFLICT,
-        }
-    }
-}
-
 pub async fn post_rule(
-    state: web::Data<State>,
+    _auth: AuthorizedAdmin,
     path: web::Path<String>,
     htmx: Htmx,
     web::Form(NewRule { name }): web::Form<NewRule>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, AddRuleError> {
-    if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return Ok(res);
-    }
+) -> database::Result<HttpResponse> {
     let group_name = path.into_inner();
-    let body = htmx
-        .is_htmx
-        .then(|| Group::display_rule(&group_name, &name, &Default::default()).0);
-    state.update_group(&group_name, |group| {
-        if group.contains_key(&name) {
-            return Err(AddRuleError::AlreadyExists);
-        }
-        group.insert(name, None);
-        Ok(())
-    })??;
-    Ok({
-        let mut res = HttpResponse::Ok();
-        if let Some(body) = body {
-            res.body(body)
-        } else {
-            res.finish()
-        }
+    let rule = Rule {
+        allowed: None,
+        group: group_name,
+        path: name,
+    };
+    DATABASE.run(|conn| {
+        use crate::schema::rules::dsl;
+        let sort = dsl::rules
+            .select(max(dsl::sort))
+            .get_result::<Option<i32>>(conn)?
+            .map(|highest| highest + 1)
+            .unwrap_or_default();
+        insert_into(dsl::rules)
+            .values((
+                dsl::sort.eq(sort),
+                dsl::group.eq(&rule.group),
+                dsl::allowed.eq(&rule.allowed),
+                dsl::path.eq(&rule.path),
+            ))
+            .execute(conn)
+    })?;
+    let mut res = HttpResponse::Ok();
+    Ok(if htmx.is_htmx {
+        res.body(rule.render())
+    } else {
+        res.finish()
     })
 }
 
-#[derive(Error, Debug)]
-pub enum UpdateRuleError {
-    #[error("{0}")]
-    UpdateGroup(#[from] UpdateGroupError),
-    #[error("That rule doesn't exist")]
-    RuleDoesNotExist,
-}
-
-impl ResponseError for UpdateRuleError {
-    fn status_code(&self) -> StatusCode {
-        match self {
-            Self::UpdateGroup(err) => err.status_code(),
-            Self::RuleDoesNotExist => StatusCode::NOT_FOUND,
-        }
-    }
-}
-
 pub async fn delete_rule(
-    state: web::Data<State>,
+    _auth: AuthorizedAdmin,
     path: web::Path<(String, String)>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, UpdateRuleError> {
-    if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return Ok(res);
-    }
-
-    let (group_name, path) = path.into_inner();
+) -> database::Result<HttpResponse> {
+    let (group, path) = path.into_inner();
     let path = urlencoding::decode(&path).unwrap_or(Cow::Borrowed(&path));
-
-    state.update_group(&group_name, |group| {
-        if group.shift_remove(&*path).is_none() {
-            return Err(UpdateRuleError::RuleDoesNotExist);
-        };
-        Ok(())
-    })??;
+    DATABASE.run(|conn| {
+        use crate::schema::rules::dsl;
+        delete(dsl::rules
+            .filter(dsl::group.eq(&group))
+            .filter(dsl::path.eq(&path)))
+            .execute(conn)
+    })?;
     Ok(HttpResponse::Ok().finish())
 }
 
 #[derive(Deserialize)]
 pub struct PatchRule {
     #[serde(deserialize_with = "deserialize_rule")]
-    rule: Rule,
+    rule: Option<bool>,
 }
 
-fn deserialize_rule<'de, D>(deserializer: D) -> Result<Rule, D::Error>
+fn deserialize_rule<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -533,26 +500,25 @@ where
 }
 
 pub async fn patch_rule(
-    state: web::Data<State>,
+    _auth: AuthorizedAdmin,
     path: web::Path<(String, String)>,
     web::Form(form): web::Form<PatchRule>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, UpdateRuleError> {
-    if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return Ok(res);
-    }
-
-    let (group_name, path) = path.into_inner();
+) -> database::Result<HttpResponse> {
+    let (group, path) = path.into_inner();
     let path = urlencoding::decode(&path).unwrap_or(Cow::Borrowed(&path));
 
-    state.update_group(&group_name, |group| {
-        let Some(rule) = group.get_mut(&*path) else {
-            return Err(UpdateRuleError::RuleDoesNotExist);
-        };
-        *rule = form.rule;
-        Ok(())
-    })??;
-    Ok(HttpResponse::Ok().finish())
+    Ok(if DATABASE.run(|conn| {
+        use crate::schema::rules::dsl;
+        update(dsl::rules)
+            .filter(dsl::group.eq(&group))
+            .filter(dsl::path.eq(&path))
+            .set(dsl::allowed.eq(&form.rule))
+            .execute(conn)
+    })? == 0 {
+        ErrorNotFound("that rule doesn't exist").error_response()
+    } else {
+        HttpResponse::Ok().finish()
+    })
 }
 
 #[derive(Deserialize)]
@@ -578,69 +544,50 @@ fn refetch_groups_deleted(htmx: &Htmx) {
 }
 
 pub async fn post_group(
-    state: web::Data<State>,
+    _auth: AuthorizedAdmin,
     htmx: Htmx,
     web::Form(form): web::Form<NewGroup>,
-    session_user: SessionUser,
-) -> Result<HttpResponse, AddGroupError> {
-    if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return Ok(res);
-    }
-    state.create_group(&form.name)?;
-    Ok({
-        let mut res = HttpResponse::Ok();
-        if htmx.is_htmx {
-            refetch_groups(&htmx);
-            res.body(
-                state
-                    .groups
-                    .read()
-                    .unwrap()
-                    .get(&*form.name)
-                    .unwrap()
-                    .read()
-                    .unwrap()
-                    .display(&form.name)
-                    .0,
-            )
-        } else {
-            res.finish()
-        }
+) -> database::Result<HttpResponse> {
+    let group = Group::new(form.name);
+    DATABASE.run(|conn| {
+        use crate::schema::groups::dsl;
+        let sort = dsl::groups
+            .select(max(dsl::sort))
+            .get_result::<Option<i32>>(conn)?
+            .map(|highest| highest + 1)
+            .unwrap_or_default();
+        insert_into(dsl::groups)
+            .values((dsl::name.eq(&group.name), dsl::sort.eq(sort)))
+            .execute(conn)
+    })?;
+    let mut res = HttpResponse::Ok();
+    Ok(if htmx.is_htmx {
+        refetch_groups(&htmx);
+        res.body(group.display_without_rules())
+    } else {
+        res.finish()
     })
 }
 
-fn api_error<T>(htmx: &Htmx, cause: T, status: StatusCode) -> HttpResponse
-where
-    T: Debug + Display,
-{
-    if htmx.is_htmx {
-        htmx.retarget("#error".to_string());
-        htmx.reswap(SwapType::InnerHtml);
-    }
-    InternalError::new(cause, if htmx.is_htmx { StatusCode::OK } else { status }).error_response()
-}
-
 pub async fn delete_group(
+    _auth: AuthorizedAdmin,
     htmx: Htmx,
-    state: web::Data<State>,
     path: web::Path<String>,
-    session_user: SessionUser,
-) -> HttpResponse {
-    if let Some(res) = session_user.authorization_admin_basic(&state) {
-        return res;
+) -> database::Result<HttpResponse> {
+    let name = path.into_inner();
+    if &name == DEFAULT_GROUP {
+        return Ok(ErrorForbidden("can't delete default group").error_response());
     }
-    let group_name = path.into_inner();
-    if &group_name == DEFAULT_GROUP {
-        return api_error(&htmx, "Can't delete default group", StatusCode::BAD_REQUEST);
-    }
-    if let Err(err) = state.remove_group(&group_name) {
-        log::error!("{err}");
-        return api_error(&htmx, err, StatusCode::INTERNAL_SERVER_ERROR);
+    if DATABASE.run(|conn| {
+        use crate::schema::groups::dsl;
+        delete(dsl::groups.filter(dsl::name.eq(&name))).execute(conn)
+    })? == 0 {
+        return Ok(ErrorNotFound("that group doesn't exist").error_response());
     }
     if htmx.is_htmx {
         refetch_groups_deleted(&htmx);
     }
-    HttpResponse::Ok().finish()
+    Ok(HttpResponse::Ok().finish())
 }
 
 pub fn login_form(invalid: bool, return_uri: &str) -> Markup {
@@ -670,76 +617,79 @@ pub fn login_form(invalid: bool, return_uri: &str) -> Markup {
 
 const QUERY_REDIRECT: &str = "r";
 
-pub async fn logout(req: HttpRequest, session_user: SessionUser) -> impl Responder {
-    let mut res = Redirect::to(
-        req.headers()
-            .get(REFERER)
-            .map(|header| header.to_str().ok())
-            .flatten()
-            .unwrap_or(&ARGS.dashboard)
-            .to_owned(),
-    )
-    .temporary()
-    .respond_to(&req);
-    session_user.logout(&req, &mut res);
+pub async fn logout(req: HttpRequest, htmx: Htmx) -> impl Responder {
+    let redirect = req.headers()
+        .get(REFERER)
+        .map(|header| header.to_str().ok())
+        .flatten()
+        .unwrap_or(&ARGS.dashboard)
+        .to_owned();
+    let mut res = if htmx.is_htmx {
+        htmx.redirect(redirect);
+        HttpResponse::Ok().finish()
+    } else {
+        Redirect::to(redirect)
+            .temporary()
+            .respond_to(&req)
+            .map_into_boxed_body()
+    };
+    log_out(&mut res);
     res
 }
 
 #[derive(Deserialize)]
 pub struct Login {
-    name: Box<str>,
-    password: Box<str>,
+    name: String,
+    password: String,
 }
 
 pub async fn post_login(
     req: HttpRequest,
+    htmx: Htmx,
     web::Form(form): web::Form<Login>,
-    state: web::Data<State>,
     return_uri: LoginReturnUri,
-) -> Result<HttpResponse, Error> {
-    let from_htmx = req.headers().contains_key("HX-Request");
-    if state
-        .users
-        .read()
-        .or(Err(Error::InternalServer))?
-        .get(&form.name)
-        .map(|user| user.password.expose_secret() == &*form.password)
-        .unwrap_or_default()
-    {
-        let mut res = if from_htmx {
-            let mut res = HttpResponse::Ok().respond_to(&req);
-            res.headers_mut().append(
-                HeaderName::from_static("hx-redirect"),
-                HeaderValue::from_str(&return_uri).unwrap(),
-            );
-            res
+) -> database::Result<HttpResponse> {
+    let authorized: bool = DATABASE.run(|conn| {
+        use crate::schema::users::dsl;
+        select(exists(dsl::users
+            .filter(dsl::name.eq(&form.name))
+            .filter(dsl::password.eq(&form.password))))
+            .get_result(conn)
+    })?;
+    if authorized {
+        let mut res = if htmx.is_htmx {
+            htmx.redirect(return_uri.0);
+            HttpResponse::Ok().finish()
         } else {
             Redirect::to(return_uri.deref().to_owned())
                 .see_other()
                 .respond_to(&req)
                 .map_into_boxed_body()
         };
-        res.add_cookie(&Cookie::build(USERNAME_COOKIE, form.name.to_string()).finish())
-            .unwrap();
-        res.add_cookie(&Cookie::build(PASSWORD_COOKIE, form.password.to_string()).finish())
-            .unwrap();
+        res.add_cookie(&{
+            let mut c = USERNAME_COOKIE.clone();
+            c.set_value(form.name);
+            c
+        }).unwrap();
+        res.add_cookie(&{
+            let mut c = PASSWORD_COOKIE.clone();
+            c.set_value(form.password);
+            c
+        }).unwrap();
         return Ok(res);
     }
     // Invalid credentials
-    Ok(if from_htmx {
-        HttpResponse::Ok().body(login_form(true, &return_uri).0)
+    Ok(if htmx.is_htmx {
+        HttpResponse::Ok().body(login_form(true, &return_uri))
     } else {
-        HttpResponse::Unauthorized().body(
-            html! {
-                h1 { "Log in" }
-                (login_form(true, &return_uri))
-            }
-            .0,
-        )
+        HttpResponse::Unauthorized().body(html! {
+            h1 { "Log in" }
+            (login_form(true, &return_uri))
+        })
     })
 }
 
-pub struct LoginReturnUri(Box<str>);
+pub struct LoginReturnUri(String);
 
 impl Deref for LoginReturnUri {
     type Target = str;
@@ -766,7 +716,7 @@ impl FromRequest for LoginReturnUri {
             qstring.get(QUERY_REDIRECT).map(|str| str.to_owned())
         }
         std::future::ready(Ok(Self(
-            if req.headers().contains_key("HX-Request") {
+            if req.headers().contains_key("hx-request") {
                 from_headers(req)
                     .map(|uri| Some(Cow::Borrowed(uri)))
                     .unwrap_or_else(|| from_query(req).map(|uri| Cow::Owned(uri)))
@@ -777,7 +727,6 @@ impl FromRequest for LoginReturnUri {
             }
             .unwrap_or(Cow::Borrowed("/"))
             .into_owned()
-            .into_boxed_str(),
         )))
     }
 }

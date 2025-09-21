@@ -2,5 +2,4 @@
 .direnv
 result
 
-users.csv
-groups
+database.db

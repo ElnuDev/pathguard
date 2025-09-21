@@ -2,10 +2,13 @@
 #![feature(impl_trait_in_assoc_type)]
 
 mod dashboard;
-mod error;
 mod models;
 mod proxy;
 mod templates;
+mod auth;
+
+mod schema;
+mod database;
 
 use std::{env, path::PathBuf};
 
@@ -19,7 +22,6 @@ use actix_web::{
     web, App, HttpResponse, HttpServer,
 };
 use maud::html;
-use models::*;
 
 use clap::{Parser, Subcommand};
 use passwords::PasswordGenerator;
@@ -29,8 +31,7 @@ use crate::{
         dashboard, delete_group, delete_rule, delete_user, get_groups, get_user, get_user_edit,
         get_user_groups, logout, patch_rule, patch_user, post_group, post_login, post_rule,
         post_user,
-    },
-    templates::page,
+    }, database::Database, templates::page
 };
 
 #[derive(Subcommand, Debug, Clone)]
@@ -54,10 +55,8 @@ pub struct FilesMode {
 pub struct Args {
     #[command(subcommand)]
     pub mode: Mode,
-    #[arg(short, long = "users", default_value = "users.csv")]
-    pub users_file: PathBuf,
-    #[arg(short, long = "groups", default_value = "groups")]
-    pub groups_dir: PathBuf,
+    #[arg(long = "db", default_value = "database.db")]
+    pub database: Box<str>,
     #[arg(short, long, default_value_t = 8000)]
     pub port: u16,
     #[arg(short, long, default_value = "/pathguard")]
@@ -73,6 +72,7 @@ pub const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
 
 lazy_static::lazy_static! {
     pub static ref ARGS: Args = Args::parse();
+    pub static ref DATABASE: Database = Database::new(&ARGS.database).unwrap();
 }
 
 pub const LOGIN_ROUTE: &str = "/login";
@@ -91,10 +91,8 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
     // If we construct this inside of HttpServer::new
     // then it will instantiate multiple times leading to state divergence
-    let state = web::Data::new(State::load(&ARGS).unwrap());
     HttpServer::new(move || {
         App::new()
-            .app_data(state.clone())
             .wrap(middleware::Logger::default())
             .wrap(middleware::NormalizePath::trim())
             .wrap(middleware::DefaultHeaders::new().add((CONTENT_TYPE, TEXT_HTML_UTF_8)))

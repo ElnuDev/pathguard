@@ -39,14 +39,11 @@ macro_rules! const_icon_raw {
 }
 pub(crate) use const_icon_raw;
 
+#[allow(unused)]
 macro_rules! const_icon {
     ($name:expr) => {
         PreEscaped(icon_raw!($name))
     };
-}
-
-pub fn icon_raw(name: &str) -> String {
-    icon(name).0
 }
 
 pub fn icon(name: &str) -> Markup {

@@ -1,64 +1,107 @@
-use actix_web::{error::ErrorUnauthorized, FromRequest, HttpRequest, HttpResponse, ResponseError};
-use awc::http::StatusCode;
-use chrono::{DateTime, Utc};
-use indexmap::{IndexMap, IndexSet};
+use chrono::{NaiveDateTime, Utc};
 use maud::{html, Markup};
 use std::{
-    convert::Infallible,
-    fmt::{Debug, Display},
-    future::{self, Ready},
-    ops::Deref,
-    sync::RwLock,
+    fmt::Debug, ops::{Deref, DerefMut}
 };
-use thiserror::Error;
-
-use csv;
-use secrecy::{ExposeSecret, SecretString};
-use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
-    dashboard::{groups_select, login_form, user_groups, CHECK, PENCIL_SQUARE, TRASH, X_MARK},
-    error::Error,
-    models::{group::DEFAULT_GROUP, Group, State},
-    templates::{icon_button, page},
-    Args, ARGS, LOGOUT_ROUTE, USERS_ROUTE,
+    ARGS, DATABASE, USERS_ROUTE, dashboard::{CHECK, PENCIL_SQUARE, TRASH, X_MARK, groups_select}, database::{self}, models::{Group, group::group_id}, templates::icon_button
 };
 
 pub const ADMIN_USERNAME: &str = "admin";
 pub const ADMIN_DEFAULT_PASSWORD: &str = "password";
 
-// TODO: Flatten core attributes (password, groups)
-// to make dealing with forms easier
-#[derive(Debug, Deserialize)]
+use diesel::prelude::*;
+use crate::schema;
+
+#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[diesel(primary_key(name))]
+#[diesel(table_name = schema::users)]
 pub struct User {
-    pub password: SecretString,
-    #[serde(deserialize_with = "deserialize_groups")]
-    pub groups: IndexSet<Box<str>>,
-    pub created: DateTime<Utc>,
-    #[serde(deserialize_with = "csv::invalid_option")]
-    pub last_active: Option<DateTime<Utc>>,
+    pub name: String,
+    pub password: String,
+    pub created: NaiveDateTime,
 }
 
-#[derive(Error, Debug)]
-pub enum UserValidationError {
-    #[error("password strength must be at least {min}/100, provided password strength was only {strength:.1}")]
-    WeakPassword { strength: f64, min: f64 },
-    #[error("\"{0}\" is a common password and shouldn't be used")]
-    CommonPassword(Box<str>),
-    #[error("group \"{0}\" doesn't exist")]
-    GroupDoesNotExist(Box<str>),
-    #[error("default group is redundant")]
-    DefaultGroup,
-}
-
-impl ResponseError for UserValidationError {
-    fn status_code(&self) -> StatusCode {
-        match self {
-            Self::WeakPassword { .. } | Self::CommonPassword(_) | Self::DefaultGroup => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
-            Self::GroupDoesNotExist { .. } => StatusCode::CONFLICT,
+impl User {
+    pub fn new(name: String, password: String) -> Self {
+        Self {
+            name,
+            password,
+            created: Utc::now().naive_utc(),
         }
+    }
+
+    pub fn with_groups(self, groups: Vec<String>) -> UserWithGroups {
+        UserWithGroups { user: self, groups }
+    }
+
+    pub fn default_admin() -> Self {
+        Self::new(ADMIN_USERNAME.into(), ADMIN_DEFAULT_PASSWORD.into())
+    }
+
+    pub fn is_admin(&self) -> bool {
+        &*self.name == ADMIN_USERNAME
+    }
+
+    pub fn last_active(&self) -> database::Result<Option<NaiveDateTime>> {
+        DATABASE.run(|conn| {
+            use crate::schema::activities::dsl::*;
+            activities
+                .order(timestamp.desc())
+                .filter(user.eq(&self.name))
+                .select(timestamp)
+                .first(conn)
+                .optional()
+        })
+    }
+}
+
+impl TryInto<UserWithGroups> for User {
+    type Error = database::DatabaseError;
+
+    fn try_into(self) -> Result<UserWithGroups, Self::Error> {
+        Ok(UserWithGroups {
+            groups: DATABASE.run(|conn| {
+                use crate::schema::user_groups::dsl::*;
+                use crate::schema::groups::dsl::*;
+                user_groups
+                    .inner_join(groups.on(name.eq(group)))
+                    .filter(user.eq(&self.name))
+                    .order(sort)
+                    .select(group)
+                    .load(conn)
+            })?,
+            user: self,
+        })
+    }
+}
+
+#[derive(Identifiable, Selectable, Queryable, Associations, Debug)]
+#[diesel(primary_key(user, group))]
+#[diesel(belongs_to(User, foreign_key = user))]
+#[diesel(table_name = schema::user_groups)]
+pub struct UserGroup {
+    pub user: String,
+    pub group: String,
+}
+
+pub struct UserWithGroups {
+    pub user: User,
+    pub groups: Vec<String>,
+}
+
+impl Deref for UserWithGroups {
+    type Target = User;
+
+    fn deref(&self) -> &Self::Target {
+        &self.user
+    }
+}
+
+impl DerefMut for UserWithGroups {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.user
     }
 }
 
@@ -66,74 +109,33 @@ impl ResponseError for UserValidationError {
 pub enum UserDisplayMode<'a> {
     #[default]
     Normal,
-    Edit {
-        state: &'a State,
-    },
+    Edit { global_groups: &'a Vec<Group> },
 }
 
-impl User {
-    pub const GROUPS_SEPERATOR: &str = "|";
+pub struct UserRenderContext<'a> {
+    pub mode: UserDisplayMode<'a>,
+    pub last_active: Option<NaiveDateTime>,
+}
 
-    pub fn default_admin() -> Self {
-        Self::new(ADMIN_DEFAULT_PASSWORD.into(), Default::default())
-    }
-
-    pub fn new(password: SecretString, groups: IndexSet<Box<str>>) -> Self {
-        Self {
-            created: Utc::now(),
-            last_active: None,
-            password,
-            groups,
-        }
-    }
-
-    pub fn validate(
-        &self,
-        global_groups: &IndexMap<String, RwLock<Group>>,
-    ) -> Result<(), UserValidationError> {
-        use UserValidationError::*;
-
-        let analyzed = passwords::analyzer::analyze(self.password.expose_secret());
-        if analyzed.is_common() {
-            return Err(CommonPassword(
-                self.password.expose_secret().to_string().into_boxed_str(),
-            ));
-        }
-
-        let strength = passwords::scorer::score(&analyzed);
-        if strength < ARGS.min_password_strength {
-            return Err(WeakPassword {
-                strength,
-                min: ARGS.min_password_strength,
-            });
-        }
-
-        for group in &self.groups {
-            if group.deref() == DEFAULT_GROUP {
-                return Err(DefaultGroup);
-            }
-            if !global_groups.contains_key(group.as_ref()) {
-                return Err(GroupDoesNotExist(group.clone()));
+impl UserWithGroups {
+    pub fn display_groups(&self) -> Markup {
+        let Self { user, groups } = self;
+        html! {
+            dd hx-trigger="groupsDeleted from:body" hx-swap="outerHTML" hx-get={ (ARGS.dashboard) (USERS_ROUTE) "/" (user.name) "/groups" } {
+                @if groups.is_empty() { em { "None" } } @else {
+                    @for (i, group_name) in groups.iter().enumerate() {
+                        @if i != 0 { ", " }
+                        a href={ "#" (group_id(group_name)) } { (group_name) };
+                    }
+                }
             }
         }
-        if let Some(group) = self
-            .groups
-            .iter()
-            .filter(|group| !global_groups.contains_key(group.as_ref()))
-            .next()
-        {
-            return Err(GroupDoesNotExist(group.clone()));
-        }
-
-        Ok(())
     }
 
-    fn display_partial_with_encoded(
-        &self,
-        name: &str,
-        mode: UserDisplayMode,
-        name_encoded: &str,
-    ) -> Markup {
+    pub fn display_partial(&self, UserRenderContext { mode, last_active }: UserRenderContext) -> Markup {
+        let Self { user: User { name, password, created }, .. } = self;
+        let name_encoded = urlencoding::encode(name);
+
         html! {
             dl {
                 @match mode {
@@ -148,16 +150,16 @@ impl User {
                         ))
                         div {
                             dt { "Password:" }
-                            dd.password.mono-font { (self.password.expose_secret()) }
+                            dd.password.mono-font { (password) }
                         }
                         @if name != ADMIN_USERNAME {
                             div {
                                 dt { "Groups:" }
-                                (user_groups(name, self))
+                                (self.display_groups())
                             }
                         }
                     },
-                    UserDisplayMode::Edit { state } => form
+                    UserDisplayMode::Edit { global_groups: groups } => form
                         hx-patch={ (ARGS.dashboard) (USERS_ROUTE) "/" (name_encoded) }
                         hx-target="closest dl"
                         hx-swap="outerHTML"
@@ -174,33 +176,32 @@ impl User {
                         (icon_button(CHECK, "", Some("ok float:right")))
                         div {
                             dt { "Password:" }
-                            dd { input type="text" name="password" value=(self.password.expose_secret()) placeholder="password" required; }
+                            dd { input type="text" name="password" value=(password) placeholder="password" required; }
                         }
                         @if name != ADMIN_USERNAME {
                             div {
                                 dt { "Groups:" }
-                                dd { (groups_select(state.groups.read(), Some(self))) }
+                                dd { (groups_select(groups, Some(self))) }
                             }
                         }
                     }
                 }
                 div {
                     dt { "Created:" }
-                    dd { (self.created) }
+                    dd { (created) }
                 }
-                div {
-                    dt { "Last active:" }
-                    dd { @if let Some(when) = self.last_active { (when) } @else { "Never" } }
+                @if name != ADMIN_USERNAME {
+                    div {
+                        dt { "Last active:" }
+                        dd { @if let Some(when) = last_active { (when) } @else { "Never" } }
+                    }
                 }
             }
         }
     }
 
-    pub fn display_partial(&self, name: &str, mode: UserDisplayMode) -> Markup {
-        self.display_partial_with_encoded(name, mode, &urlencoding::encode(name))
-    }
-
-    pub fn display(&self, name: &str, mode: UserDisplayMode) -> Markup {
+    pub fn display(&self, UserRenderContext { mode, last_active }: UserRenderContext) -> Markup {
+        let name = &self.name;
         html! {
             div {
                 @let name_encoded = urlencoding::encode(name);
@@ -214,318 +215,12 @@ impl User {
                     }
                 }
                 div {
-                    details {
+                    details #(self.name) {
                         summary { (name) }
-                        (self.display_partial_with_encoded(name, mode, &name_encoded))
+                        (self.display_partial(UserRenderContext { mode, last_active }))
                     }
                 }
             }
         }
-    }
-}
-
-impl AsRef<User> for User {
-    fn as_ref(&self) -> &User {
-        &self
-    }
-}
-
-#[derive(Deserialize)]
-pub struct UserData<N: AsRef<str>, U: AsRef<User>> {
-    pub name: N,
-    #[serde(flatten)]
-    pub user: U,
-}
-
-pub type OwnedUserData = UserData<Box<str>, User>;
-
-fn deserialize_groups<'de, D>(deserializer: D) -> Result<IndexSet<Box<str>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: String = Deserialize::deserialize(deserializer)?;
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        return Ok(IndexSet::new());
-    }
-    Ok(trimmed
-        .split(User::GROUPS_SEPERATOR)
-        .map(|str| str.to_owned().into_boxed_str())
-        .collect())
-}
-
-impl<N, U> Serialize for UserData<N, U>
-where
-    N: AsRef<str>,
-    U: AsRef<User>,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut s = serializer.serialize_struct("user", 5)?;
-        s.serialize_field("name", self.name.as_ref())?;
-        s.serialize_field("password", self.user.as_ref().password.expose_secret())?;
-        s.serialize_field("groups", &'groups: {
-            let mut s = String::new();
-            let mut iter = self.user.as_ref().groups.iter();
-            if let Some(next) = iter.next() {
-                s.push_str(next);
-            } else {
-                break 'groups s;
-            }
-            for group_name in iter {
-                s.push_str(User::GROUPS_SEPERATOR);
-                s.push_str(&group_name);
-            }
-            s
-        })?;
-        s.serialize_field("created", &self.user.as_ref().created)?;
-        s.serialize_field("last_active", &self.user.as_ref().last_active)?;
-        s.end()
-    }
-}
-
-pub struct SessionUser(pub Option<SessionUserCookies>);
-
-impl Deref for SessionUser {
-    type Target = Option<SessionUserCookies>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-pub struct SessionUserCookies {
-    pub username: Box<str>,
-    pub password: Box<str>,
-}
-
-pub const USERNAME_COOKIE: &str = "pathguard_username";
-pub const PASSWORD_COOKIE: &str = "pathguard_password";
-
-pub type Authorization = std::result::Result<(), UnauthorizedError>;
-
-#[derive(Debug)]
-pub enum UnauthorizedError {
-    /// User is unauthorized and not logged in
-    NotLoggedIn,
-    /// User is unauthorized and logged in
-    LoggedIn,
-    /// User is unauthorized and bad credentials
-    BadLogin,
-}
-
-impl ResponseError for UnauthorizedError {
-    fn status_code(&self) -> StatusCode {
-        match self {
-            Self::NotLoggedIn | Self::BadLogin => StatusCode::UNAUTHORIZED,
-            Self::LoggedIn => StatusCode::FORBIDDEN,
-        }
-    }
-}
-
-impl UnauthorizedError {
-    /// For pages
-    pub fn fancy_response(&self, req: &HttpRequest, session_user: &SessionUser) -> HttpResponse {
-        let mut res = HttpResponse::build(self.status_code())
-        .body(page(match self {
-            Self::BadLogin => html! {
-                h1 { "Log in" }
-                p { "The username or password you last signed in with have been invalidated. Please sign in again." }
-                (login_form(false, req.path()))
-            },
-            Self::NotLoggedIn => html! {
-                h1 { "Log in" }
-                (login_form(false, req.path()))
-            },
-            Self::LoggedIn => html! {
-                span.float:right {
-                    @if let Some(cookies) = session_user.deref() { "Hello, " strong { (cookies.username) } " " }
-                    a href={ (ARGS.dashboard) (LOGOUT_ROUTE) } { "Log out" }
-                }
-                h1 { "403 Forbidden" }
-            },
-        }));
-        if let Self::BadLogin = self {
-            session_user.logout(req, &mut res);
-        }
-        res
-    }
-}
-
-impl Display for UnauthorizedError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::NotLoggedIn => "Unauthorized: not logged in",
-                Self::LoggedIn => "Unauthorized",
-                Self::BadLogin => "Unauthorized: invalid credentials",
-            }
-        )
-    }
-}
-
-pub trait UnauthorizedResponse {
-    fn basic(&self) -> Option<HttpResponse>;
-    fn fancy(&self, req: &HttpRequest, session_user: &SessionUser) -> Option<HttpResponse>;
-}
-
-impl UnauthorizedResponse for crate::error::Result<Authorization> {
-    fn basic(&self) -> Option<HttpResponse> {
-        Some(match self {
-            Ok(Ok(())) => return None,
-            Ok(Err(unauthorized)) => unauthorized.error_response(),
-            Err(err) => ErrorUnauthorized(err.to_string()).error_response(),
-        })
-    }
-
-    fn fancy(&self, req: &HttpRequest, session_user: &SessionUser) -> Option<HttpResponse> {
-        Some({
-            let mut res = match self {
-                Ok(Ok(())) => return None,
-                Ok(Err(unauthorized)) => unauthorized.fancy_response(req, session_user),
-                Err(err) => err.error_response(),
-            };
-            if req.headers().contains_key("hx-boosted") {
-                *res.status_mut() = StatusCode::OK;
-            }
-            res
-        })
-    }
-}
-
-impl SessionUser {
-    pub fn authorization_admin_fancy(
-        &self,
-        state: &State,
-        req: &HttpRequest,
-    ) -> Option<HttpResponse> {
-        self.authorization_admin(state).fancy(req, self)
-    }
-
-    pub fn authorization_admin_basic(&self, state: &State) -> Option<HttpResponse> {
-        self.authorization_admin(state).basic()
-    }
-
-    pub fn authorization_fancy(
-        &self,
-        state: &State,
-        req: &HttpRequest,
-        args: &Args,
-    ) -> Option<HttpResponse> {
-        self.authorization(req, state).fancy(req, self)
-    }
-
-    pub fn authorization_basic(&self, state: &State, req: &HttpRequest) -> Option<HttpResponse> {
-        self.authorization(req, state).basic()
-    }
-
-    fn authorization_admin(&self, state: &State) -> crate::error::Result<Authorization> {
-        use UnauthorizedError::*;
-        let Some(cookies) = &self.0 else {
-            return Ok(Err(NotLoggedIn));
-        };
-        match state
-            .update_users(|users| {
-                users.get_mut(&cookies.username).map(|user| {
-                    let auth = user.password.expose_secret() == &*cookies.password;
-                    if auth {
-                        user.last_active = Some(Utc::now());
-                    }
-                    auth
-                })
-            })
-            .or(Err(Error::InternalServer))?
-        {
-            Some(true) if &*cookies.username == ADMIN_USERNAME => Ok(Ok(())),
-            Some(true) => Ok(Err(LoggedIn)),
-            _ => Ok(Err(BadLogin)),
-        }
-    }
-
-    fn authorization(
-        &self,
-        req: &HttpRequest,
-        state: &State,
-    ) -> crate::error::Result<Authorization> {
-        return todo!();
-        use UnauthorizedError::*;
-        const OK: crate::error::Result<Authorization> = Ok(Authorization::Ok(()));
-        let groups = state.groups.read().or(Err(Error::InternalServer))?;
-        // If resource has public access, session user has access regardless
-        if groups
-            .get(DEFAULT_GROUP)
-            .map(|group| {
-                group
-                    .read()
-                    .map(|group| group.allowed(req.path()).unwrap_or_default())
-                    .ok()
-            })
-            .flatten()
-            .ok_or(Error::InternalServer)?
-        {
-            return OK;
-        }
-        let Some(cookies) = &self.0 else {
-            return OK;
-        };
-        let users = &*state.users.read().or(Err(Error::InternalServer))?;
-        let Some(user) = users
-            .get(&cookies.username)
-            .filter(|true_user| true_user.password.expose_secret() == &*cookies.password)
-        else {
-            return Ok(Err(BadLogin));
-        };
-        let mut allowed = false;
-        for group_name in &user.groups {
-            let Some(group_lock) = groups.get(group_name.deref()) else {
-                continue;
-            };
-            let group = group_lock.read().or(Err(Error::InternalServer))?;
-            if let Some(group_allowed) = group.allowed(req.path()) {
-                allowed = group_allowed;
-            }
-        }
-        if allowed {
-            OK
-        } else {
-            Ok(Err(LoggedIn))
-        }
-    }
-
-    pub fn logout<T>(&self, req: &HttpRequest, res: &mut HttpResponse<T>) {
-        if let Some(username) = req.cookie(USERNAME_COOKIE) {
-            res.add_removal_cookie(&username).unwrap();
-        }
-        if let Some(password) = req.cookie(PASSWORD_COOKIE) {
-            res.add_removal_cookie(&password).unwrap();
-        }
-    }
-}
-
-impl FromRequest for SessionUser {
-    type Error = Infallible;
-
-    type Future = Ready<Result<Self, Self::Error>>;
-
-    fn from_request(
-        req: &actix_web::HttpRequest,
-        _payload: &mut actix_web::dev::Payload,
-    ) -> Self::Future {
-        future::ready(Ok(Self((|| {
-            let Some(username_cookie) = req.cookie(USERNAME_COOKIE) else {
-                return None;
-            };
-            let Some(password_cookie) = req.cookie(PASSWORD_COOKIE) else {
-                return None;
-            };
-            Some(SessionUserCookies {
-                username: username_cookie.value().to_string().into_boxed_str(),
-                password: password_cookie.value().to_string().into_boxed_str(),
-            })
-        })())))
     }
 }
