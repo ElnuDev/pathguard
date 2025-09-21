@@ -144,12 +144,8 @@ impl FromRequest for MaybeSessionUserCookies {
         _payload: &mut actix_web::dev::Payload,
     ) -> Self::Future {
         future::ready(Ok(Self((|| {
-            let Some(username_cookie) = req.cookie(USERNAME_COOKIE.name()) else {
-                return None;
-            };
-            let Some(password_cookie) = req.cookie(PASSWORD_COOKIE.name()) else {
-                return None;
-            };
+            let username_cookie = req.cookie(USERNAME_COOKIE.name())?;
+            let password_cookie = req.cookie(PASSWORD_COOKIE.name())?;
             Some(SessionUserCookies {
                 username: username_cookie.value().to_string().into_boxed_str(),
                 password: password_cookie.value().to_string().into_boxed_str(),

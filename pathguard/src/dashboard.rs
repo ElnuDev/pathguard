@@ -146,7 +146,10 @@ fn new_user_form(autofocus: bool, groups: &Vec<Group>) -> Markup {
             div {
                 .flex-row.align-items:center {
                     div { input type="text" name="name" placeholder="username" required autofocus[autofocus]; }
-                    div { input type="text" name="password" placeholder="password" value=[PASSWORD_GENERATOR.generate_one().ok()] required; }
+                    div { input type="text" name="password" placeholder="password" value=[{
+                        #[allow(clippy::match_result_ok)]
+                        PASSWORD_GENERATOR.generate_one().ok()
+                    }] required; }
                     div {
                         details.inline {
                             summary { "Groups" }
