@@ -23,12 +23,15 @@ pub enum DatabaseError {
 
 impl ResponseError for DatabaseError {
     fn status_code(&self) -> StatusCode {
-        use diesel::result::{Error, DatabaseErrorKind as Kind};
+        use diesel::result::{DatabaseErrorKind as Kind, Error};
         let Self::Diesel(diesel_error) = self else {
             return StatusCode::SERVICE_UNAVAILABLE;
         };
         match diesel_error {
-            Error::DatabaseError(Kind::UniqueViolation | Kind::ForeignKeyViolation | Kind::ExclusionViolation, _) => StatusCode::CONFLICT,
+            Error::DatabaseError(
+                Kind::UniqueViolation | Kind::ForeignKeyViolation | Kind::ExclusionViolation,
+                _,
+            ) => StatusCode::CONFLICT,
             Error::DatabaseError(Kind::CheckViolation, _) => StatusCode::UNPROCESSABLE_ENTITY,
             Error::NotFound => StatusCode::NOT_FOUND,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -83,10 +86,7 @@ impl Database {
     pub fn groups(&self) -> Result<Vec<Group>> {
         self.run(|conn| {
             use crate::schema::groups::dsl::*;
-            groups
-                .select(Group::as_select())
-                .order_by(sort)
-                .load(conn)
+            groups.select(Group::as_select()).order_by(sort).load(conn)
         })
     }
 
@@ -104,9 +104,7 @@ impl Database {
     pub fn users(&self) -> Result<Vec<User>> {
         self.run(|conn| {
             use crate::schema::users::dsl::*;
-            users
-                .select(User::as_select())
-                .load(conn)
+            users.select(User::as_select()).load(conn)
         })
     }
 }

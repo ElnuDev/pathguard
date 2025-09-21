@@ -1,12 +1,15 @@
-use maud::{Markup, Render, html};
+use maud::{html, Markup, Render};
 
 use crate::{
-    ARGS, DATABASE, GROUPS_ROUTE, dashboard::{PLUS, TRASH}, database, templates::{const_icon_button, icon_button}
+    dashboard::{PLUS, TRASH},
+    database,
+    templates::{const_icon_button, icon_button},
+    ARGS, DATABASE, GROUPS_ROUTE,
 };
 
+use crate::schema::*;
 use diesel::prelude::*;
 use diesel::BelongingToDsl;
-use crate::schema::*;
 
 #[derive(Queryable, Selectable, Identifiable, PartialEq, Debug)]
 #[diesel(primary_key(name))]

@@ -47,10 +47,4 @@ diesel::joinable!(rules -> groups (group));
 diesel::joinable!(user_groups -> groups (group));
 diesel::joinable!(user_groups -> users (user));
 
-diesel::allow_tables_to_appear_in_same_query!(
-    activities,
-    groups,
-    rules,
-    user_groups,
-    users,
-);
+diesel::allow_tables_to_appear_in_same_query!(activities, groups, rules, user_groups, users,);

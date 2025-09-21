@@ -1,4 +1,8 @@
-use std::{net::{AddrParseError, IpAddr, Ipv4Addr}, ops::{Deref, DerefMut}, str::FromStr};
+use std::{
+    net::{AddrParseError, IpAddr, Ipv4Addr},
+    ops::{Deref, DerefMut},
+    str::FromStr,
+};
 
 use actix_web::HttpRequest;
 use chrono::NaiveDateTime;
@@ -15,7 +19,7 @@ pub struct Activity {
     #[diesel(deserialize_as = String)]
     pub ip: DbIpAddr,
     pub path: String,
-    pub allowed: bool
+    pub allowed: bool,
 }
 
 impl Activity {

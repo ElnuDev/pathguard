@@ -1,6 +1,6 @@
-use actix_web::{HttpRequest, HttpResponse, ResponseError, web, http::StatusCode};
-use awc::{Client, error::SendRequestError};
-use maud::{Render, html};
+use actix_web::{http::StatusCode, web, HttpRequest, HttpResponse, ResponseError};
+use awc::{error::SendRequestError, Client};
+use maud::{html, Render};
 use thiserror::Error;
 
 use crate::auth::{Authorized, Fancy, FancyError};
@@ -34,7 +34,10 @@ pub async fn proxy(
         format!("http://127.0.0.1:{}{}", 1313, req.uri()),
         req.head(),
     );
-    let res = forwarded_req.send_body(body).await.map_err(ProxyError::SendRequest)?;
+    let res = forwarded_req
+        .send_body(body)
+        .await
+        .map_err(ProxyError::SendRequest)?;
     let mut client_res = {
         let mut builder = HttpResponse::build(res.status());
         for (key, value) in res.headers() {

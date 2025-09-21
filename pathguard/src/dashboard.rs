@@ -1,25 +1,31 @@
-use std::{
-    borrow::Cow,
-    convert::Infallible,
-    fmt::Debug,
-    future::Ready,
-    ops::Deref,
-};
+use std::{borrow::Cow, convert::Infallible, fmt::Debug, future::Ready, ops::Deref};
 
 use crate::{
-    ARGS, DATABASE, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE, auth::{AuthorizedAdmin, Fancy, PASSWORD_COOKIE, USERNAME_COOKIE, log_out}, database::{self, DatabaseError}, models::{
-        Activity, Group, User, group::{self, DEFAULT_GROUP, Rule}, user::{
-            ADMIN_USERNAME, UserDisplayMode, UserRenderContext, UserWithGroups
-        }
-    }, templates::{const_icon_button, fancy_page}
+    auth::{log_out, AuthorizedAdmin, Fancy, PASSWORD_COOKIE, USERNAME_COOKIE},
+    database::{self, DatabaseError},
+    models::{
+        group::{self, Rule, DEFAULT_GROUP},
+        user::{UserDisplayMode, UserRenderContext, UserWithGroups, ADMIN_USERNAME},
+        Activity, Group, User,
+    },
+    templates::{const_icon_button, fancy_page},
+    ARGS, DATABASE, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE,
 };
 use actix_htmx::Htmx;
 use actix_web::{
-    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError, error::{ErrorBadRequest, ErrorForbidden, ErrorNotFound}, http::header::REFERER, web::{self, Redirect}
+    error::{ErrorBadRequest, ErrorForbidden, ErrorNotFound},
+    http::header::REFERER,
+    web::{self, Redirect},
+    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError,
 };
 use awc::http::StatusCode;
-use diesel::{dsl::{delete, exists, insert_into, max}, prelude::*, r2d2::ConnectionManager, select, update};
-use maud::{Markup, PreEscaped, Render, html};
+use diesel::{
+    dsl::{delete, exists, insert_into, max},
+    prelude::*,
+    r2d2::ConnectionManager,
+    select, update,
+};
+use maud::{html, Markup, PreEscaped, Render};
 use qstring::{self};
 use r2d2::PooledConnection;
 use serde::{Deserialize, Deserializer};
@@ -41,9 +47,7 @@ pub const CHECK: &str = CHECK_;
 const X_MARK_: &str = "x-mark";
 pub const X_MARK: &str = X_MARK_;
 
-pub async fn dashboard(
-    _auth: Fancy<AuthorizedAdmin>,
-) -> database::Result<HttpResponse> {
+pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpResponse> {
     const ACTIVITY_LIMIT: i64 = 100;
     Ok(HttpResponse::Ok().body(fancy_page(html! {
         header.navbar {
@@ -162,9 +166,7 @@ fn new_user_form(autofocus: bool, groups: &Vec<Group>) -> Markup {
     }
 }
 
-pub async fn get_groups(
-    _auth: AuthorizedAdmin,
-) -> Result<HttpResponse, DatabaseError> {
+pub async fn get_groups(_auth: AuthorizedAdmin) -> Result<HttpResponse, DatabaseError> {
     Ok(HttpResponse::Ok().body(groups_select(&DATABASE.groups()?, None)))
 }
 
@@ -180,10 +182,7 @@ pub async fn get_user_groups(
     Ok(HttpResponse::Ok().body(user.display_groups()))
 }
 
-pub fn groups_select(
-    groups: &Vec<Group>,
-    user: Option<&UserWithGroups>,
-) -> Markup {
+pub fn groups_select(groups: &Vec<Group>, user: Option<&UserWithGroups>) -> Markup {
     html! {
         select hx-trigger="groups from:body" hx-get={ (ARGS.dashboard) (GROUPS_ROUTE) } name="groups" multiple {
             @for group in groups {
@@ -219,9 +218,7 @@ pub fn validate_password(password: &str) -> Result<(), PasswordValidationError> 
 
     let analyzed = passwords::analyzer::analyze(password);
     if analyzed.is_common() {
-        return Err(CommonPassword(
-            password.to_string().into_boxed_str(),
-        ));
+        return Err(CommonPassword(password.to_string().into_boxed_str()));
     }
 
     let strength = passwords::scorer::score(&analyzed);
@@ -303,9 +300,7 @@ pub async fn post_user(
     DATABASE.run(|conn| {
         conn.transaction(|conn| {
             use crate::schema::users::dsl;
-            insert_into(dsl::users)
-                .values(user.deref())
-                .execute(conn)?;
+            insert_into(dsl::users).values(user.deref()).execute(conn)?;
             add_groups(conn, &user.name, user.groups.iter())?;
             Ok(())
         })
@@ -327,11 +322,8 @@ pub async fn post_user(
 
 pub fn get_user_generic(
     edit: bool,
-) -> impl AsyncFn(AuthorizedAdmin, web::Path<String>) -> database::Result<HttpResponse>
-{
-    async move |_auth: AuthorizedAdmin,
-                path: web::Path<String>|
-                -> database::Result<HttpResponse> {
+) -> impl AsyncFn(AuthorizedAdmin, web::Path<String>) -> database::Result<HttpResponse> {
+    async move |_auth: AuthorizedAdmin, path: web::Path<String>| -> database::Result<HttpResponse> {
         let username = path.into_inner();
         let Some(user) = DATABASE.user(&username)? else {
             return Ok(ErrorNotFound("That user doesn't exist").error_response());
@@ -342,12 +334,12 @@ pub fn get_user_generic(
             .as_ref()
             .map(|global_groups| UserDisplayMode::Edit { global_groups })
             .unwrap_or_default();
-        Ok(HttpResponse::Ok().body(
-            user.display_partial(UserRenderContext {
+        Ok(
+            HttpResponse::Ok().body(user.display_partial(UserRenderContext {
                 mode,
                 last_active: user.last_active()?,
-            })
-        ))
+            })),
+        )
     }
 }
 
@@ -371,7 +363,10 @@ pub async fn patch_user(
     web::Form(form): web::Form<Vec<(String, String)>>,
     path: web::Path<String>,
 ) -> Result<HttpResponse, UserError> {
-    let UserForm { password, mut groups } = match UserForm::deserialize(&form) {
+    let UserForm {
+        password,
+        mut groups,
+    } = match UserForm::deserialize(&form) {
         Ok(form) => form,
         Err(err) => return Ok(ErrorBadRequest(err).error_response()),
     };
@@ -389,7 +384,9 @@ pub async fn patch_user(
             select(exists(dsl::users.filter(dsl::name.eq(&name)))).get_result(conn)?
         };
         if !user_exists {
-            return Ok(Some(ErrorNotFound("that user doesn't exist").error_response()))
+            return Ok(Some(
+                ErrorNotFound("that user doesn't exist").error_response(),
+            ));
         }
         conn.transaction(|conn| -> Result<(), diesel::result::Error> {
             use crate::schema::user_groups::dsl;
@@ -398,7 +395,9 @@ pub async fn patch_user(
             Ok(())
         })?;
         Ok(None)
-    })? { return Ok(res); }
+    })? {
+        return Ok(res);
+    }
     let user = User::new(name, password).with_groups(groups);
 
     let mut res = HttpResponse::Ok();
@@ -417,14 +416,17 @@ pub async fn delete_user(
     path: web::Path<String>,
 ) -> database::Result<HttpResponse> {
     let name = path.into_inner();
-    Ok(if DATABASE.run(|conn| {
-        use crate::schema::users::dsl;
-        delete(dsl::users.filter(dsl::name.eq(&name))).execute(conn)
-    })? == 0 {
-        ErrorNotFound("that user doesn't exist").error_response()
-    } else {
-        HttpResponse::Ok().finish()
-    })
+    Ok(
+        if DATABASE.run(|conn| {
+            use crate::schema::users::dsl;
+            delete(dsl::users.filter(dsl::name.eq(&name))).execute(conn)
+        })? == 0
+        {
+            ErrorNotFound("that user doesn't exist").error_response()
+        } else {
+            HttpResponse::Ok().finish()
+        },
+    )
 }
 
 #[derive(Deserialize)]
@@ -476,10 +478,12 @@ pub async fn delete_rule(
     let path = urlencoding::decode(&path).unwrap_or(Cow::Borrowed(&path));
     DATABASE.run(|conn| {
         use crate::schema::rules::dsl;
-        delete(dsl::rules
-            .filter(dsl::group.eq(&group))
-            .filter(dsl::path.eq(&path)))
-            .execute(conn)
+        delete(
+            dsl::rules
+                .filter(dsl::group.eq(&group))
+                .filter(dsl::path.eq(&path)),
+        )
+        .execute(conn)
     })?;
     Ok(HttpResponse::Ok().finish())
 }
@@ -510,18 +514,21 @@ pub async fn patch_rule(
     let (group, path) = path.into_inner();
     let path = urlencoding::decode(&path).unwrap_or(Cow::Borrowed(&path));
 
-    Ok(if DATABASE.run(|conn| {
-        use crate::schema::rules::dsl;
-        update(dsl::rules)
-            .filter(dsl::group.eq(&group))
-            .filter(dsl::path.eq(&path))
-            .set(dsl::allowed.eq(&form.rule))
-            .execute(conn)
-    })? == 0 {
-        ErrorNotFound("that rule doesn't exist").error_response()
-    } else {
-        HttpResponse::Ok().finish()
-    })
+    Ok(
+        if DATABASE.run(|conn| {
+            use crate::schema::rules::dsl;
+            update(dsl::rules)
+                .filter(dsl::group.eq(&group))
+                .filter(dsl::path.eq(&path))
+                .set(dsl::allowed.eq(&form.rule))
+                .execute(conn)
+        })? == 0
+        {
+            ErrorNotFound("that rule doesn't exist").error_response()
+        } else {
+            HttpResponse::Ok().finish()
+        },
+    )
 }
 
 #[derive(Deserialize)]
@@ -584,7 +591,8 @@ pub async fn delete_group(
     if DATABASE.run(|conn| {
         use crate::schema::groups::dsl;
         delete(dsl::groups.filter(dsl::name.eq(&name))).execute(conn)
-    })? == 0 {
+    })? == 0
+    {
         return Ok(ErrorNotFound("that group doesn't exist").error_response());
     }
     if htmx.is_htmx {
@@ -621,7 +629,8 @@ pub fn login_form(invalid: bool, return_uri: &str) -> Markup {
 const QUERY_REDIRECT: &str = "r";
 
 pub async fn logout(req: HttpRequest, htmx: Htmx) -> impl Responder {
-    let redirect = req.headers()
+    let redirect = req
+        .headers()
         .get(REFERER)
         .and_then(|header| header.to_str().ok())
         .unwrap_or(&ARGS.dashboard)
@@ -653,10 +662,12 @@ pub async fn post_login(
 ) -> database::Result<HttpResponse> {
     let authorized: bool = DATABASE.run(|conn| {
         use crate::schema::users::dsl;
-        select(exists(dsl::users
-            .filter(dsl::name.eq(&form.name))
-            .filter(dsl::password.eq(&form.password))))
-            .get_result(conn)
+        select(exists(
+            dsl::users
+                .filter(dsl::name.eq(&form.name))
+                .filter(dsl::password.eq(&form.password)),
+        ))
+        .get_result(conn)
     })?;
     if authorized {
         let mut res = if htmx.is_htmx {
@@ -672,12 +683,14 @@ pub async fn post_login(
             let mut c = USERNAME_COOKIE.clone();
             c.set_value(form.name);
             c
-        }).unwrap();
+        })
+        .unwrap();
         res.add_cookie(&{
             let mut c = PASSWORD_COOKIE.clone();
             c.set_value(form.password);
             c
-        }).unwrap();
+        })
+        .unwrap();
         return Ok(res);
     }
     // Invalid credentials
@@ -727,7 +740,7 @@ impl FromRequest for LoginReturnUri {
                     .unwrap_or_else(|| from_headers(req).map(Cow::Borrowed))
             }
             .unwrap_or(Cow::Borrowed("/"))
-            .into_owned()
+            .into_owned(),
         )))
     }
 }

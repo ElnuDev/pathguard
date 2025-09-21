@@ -1,18 +1,23 @@
 use chrono::{NaiveDateTime, Utc};
 use maud::{html, Markup};
 use std::{
-    fmt::Debug, ops::{Deref, DerefMut}
+    fmt::Debug,
+    ops::{Deref, DerefMut},
 };
 
 use crate::{
-    ARGS, DATABASE, USERS_ROUTE, dashboard::{CHECK, PENCIL_SQUARE, TRASH, X_MARK, groups_select}, database::{self}, models::{Group, group::group_id}, templates::icon_button
+    dashboard::{groups_select, CHECK, PENCIL_SQUARE, TRASH, X_MARK},
+    database::{self},
+    models::{group::group_id, Group},
+    templates::icon_button,
+    ARGS, DATABASE, USERS_ROUTE,
 };
 
 pub const ADMIN_USERNAME: &str = "admin";
 pub const ADMIN_DEFAULT_PASSWORD: &str = "password";
 
-use diesel::prelude::*;
 use crate::schema;
+use diesel::prelude::*;
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
 #[diesel(primary_key(name))]
@@ -63,8 +68,8 @@ impl TryInto<UserWithGroups> for User {
     fn try_into(self) -> Result<UserWithGroups, Self::Error> {
         Ok(UserWithGroups {
             groups: DATABASE.run(|conn| {
-                use crate::schema::user_groups::dsl::*;
                 use crate::schema::groups::dsl::*;
+                use crate::schema::user_groups::dsl::*;
                 user_groups
                     .inner_join(groups.on(name.eq(group)))
                     .filter(user.eq(&self.name))
@@ -109,7 +114,9 @@ impl DerefMut for UserWithGroups {
 pub enum UserDisplayMode<'a> {
     #[default]
     Normal,
-    Edit { global_groups: &'a Vec<Group> },
+    Edit {
+        global_groups: &'a Vec<Group>,
+    },
 }
 
 pub struct UserRenderContext<'a> {
@@ -132,8 +139,19 @@ impl UserWithGroups {
         }
     }
 
-    pub fn display_partial(&self, UserRenderContext { mode, last_active }: UserRenderContext) -> Markup {
-        let Self { user: User { name, password, created }, .. } = self;
+    pub fn display_partial(
+        &self,
+        UserRenderContext { mode, last_active }: UserRenderContext,
+    ) -> Markup {
+        let Self {
+            user:
+                User {
+                    name,
+                    password,
+                    created,
+                },
+            ..
+        } = self;
         let name_encoded = urlencoding::encode(name);
 
         html! {

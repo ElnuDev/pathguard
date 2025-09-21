@@ -1,14 +1,14 @@
 #![feature(rwlock_downgrade)]
 #![feature(impl_trait_in_assoc_type)]
 
+mod auth;
 mod dashboard;
 mod models;
 mod proxy;
 mod templates;
-mod auth;
 
-mod schema;
 mod database;
+mod schema;
 
 use std::{env, path::PathBuf};
 
@@ -31,7 +31,9 @@ use crate::{
         dashboard, delete_group, delete_rule, delete_user, get_groups, get_user, get_user_edit,
         get_user_groups, logout, patch_rule, patch_user, post_group, post_login, post_rule,
         post_user,
-    }, database::Database, templates::page
+    },
+    database::Database,
+    templates::page,
 };
 
 #[derive(Subcommand, Debug, Clone)]

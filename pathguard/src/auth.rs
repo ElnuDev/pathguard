@@ -1,17 +1,32 @@
-use actix_web::{FromRequest, HttpRequest, HttpResponse, ResponseError, body::BoxBody, cookie::Cookie, http::{StatusCode, header::ContentType}};
-use awc::http::header::{CONTENT_TYPE, TryIntoHeaderValue};
+use actix_web::{
+    body::BoxBody,
+    cookie::Cookie,
+    http::{header::ContentType, StatusCode},
+    FromRequest, HttpRequest, HttpResponse, ResponseError,
+};
+use awc::http::header::{TryIntoHeaderValue, CONTENT_TYPE};
 use chrono::Utc;
 use derive_more::{Display, From};
 use diesel::{dsl::insert_into, prelude::*};
-use maud::{Markup, Render, html};
+use maud::{html, Markup, Render};
 use std::{
-    convert::Infallible, fmt::Debug, future::{self, Ready, ready}, ops::{Deref, DerefMut}
+    convert::Infallible,
+    fmt::Debug,
+    future::{self, ready, Ready},
+    ops::{Deref, DerefMut},
 };
 use thiserror::Error;
 
-
 use crate::{
-    ARGS, DATABASE, LOGOUT_ROUTE, dashboard::login_form, database::{self, DatabaseError}, models::{Activity, User, group::{DEFAULT_GROUP, Rule}, user::{ADMIN_USERNAME, UserGroup}}, templates::page
+    dashboard::login_form,
+    database::{self, DatabaseError},
+    models::{
+        group::{Rule, DEFAULT_GROUP},
+        user::{UserGroup, ADMIN_USERNAME},
+        Activity, User,
+    },
+    templates::page,
+    ARGS, DATABASE, LOGOUT_ROUTE,
 };
 
 pub struct MaybeSessionUserCookies(pub Option<SessionUserCookies>);
@@ -44,15 +59,21 @@ pub enum UnauthorizedError {
 
 impl UnauthorizedError {
     fn not_logged_in(req: &HttpRequest) -> Self {
-        Self::NotLoggedIn { path: req.path().to_string() }
+        Self::NotLoggedIn {
+            path: req.path().to_string(),
+        }
     }
 
     fn logged_in(user: User) -> Self {
-        Self::LoggedIn { username: user.name }
+        Self::LoggedIn {
+            username: user.name,
+        }
     }
 
     fn bad_login(req: &HttpRequest) -> Self {
-        Self::BadLogin { path: req.path().to_string() }
+        Self::BadLogin {
+            path: req.path().to_string(),
+        }
     }
 }
 
@@ -196,9 +217,9 @@ fn allowed_and_log(req: &HttpRequest, user: Option<&User>) -> database::Result<b
         let allowed = {
             if let Some(user) = user {
                 use crate::schema::{
+                    groups::dsl::{name as group_name, sort as group_sort, *},
+                    rules::dsl::{group as rule_group, sort as rule_sort, *},
                     user_groups::dsl::group as user_group_group,
-                    groups::dsl::{*, sort as group_sort, name as group_name},
-                    rules::dsl::{*, sort as rule_sort, group as rule_group},
                 };
                 UserGroup::belonging_to(user)
                     .inner_join(groups.on(group_name.eq(user_group_group)))
@@ -214,13 +235,13 @@ fn allowed_and_log(req: &HttpRequest, user: Option<&User>) -> database::Result<b
                     .select(Rule::as_select())
                     .load(conn)
             }?
-                .iter()
-                .filter_map(|rule| rule.allowed
-                    .and_then(|allowed| path
-                        .starts_with(&rule.path)
-                        .then_some(allowed)))
-                .next_back()
-                .unwrap_or_default()
+            .iter()
+            .filter_map(|rule| {
+                rule.allowed
+                    .and_then(|allowed| path.starts_with(&rule.path).then_some(allowed))
+            })
+            .next_back()
+            .unwrap_or_default()
         };
         {
             use crate::schema::activities::dsl::activities;
@@ -249,7 +270,11 @@ impl FromRequest for AuthorizedNoCheck {
     fn from_request(req: &HttpRequest, payload: &mut actix_web::dev::Payload) -> Self::Future {
         ready((|| {
             use AuthorizationError::*;
-            let MaybeSessionUserCookies(Some(SessionUserCookies { username, password })) = MaybeSessionUserCookies::from_request(req, payload).into_inner().unwrap() else {
+            let MaybeSessionUserCookies(Some(SessionUserCookies { username, password })) =
+                MaybeSessionUserCookies::from_request(req, payload)
+                    .into_inner()
+                    .unwrap()
+            else {
                 return Err(Unauthorized(UnauthorizedError::not_logged_in(req)));
             };
             let user = match DATABASE.run(|conn| {
@@ -260,7 +285,13 @@ impl FromRequest for AuthorizedNoCheck {
                     .get_result::<User>(conn)
                     .optional()
             })? {
-                Some(user) => if *user.password == *password { user } else { return Err(Unauthorized(UnauthorizedError::bad_login(req))) },
+                Some(user) => {
+                    if *user.password == *password {
+                        user
+                    } else {
+                        return Err(Unauthorized(UnauthorizedError::bad_login(req)));
+                    }
+                }
                 None => return Err(Unauthorized(UnauthorizedError::not_logged_in(req))),
             };
             Ok(Self(user))
@@ -278,15 +309,18 @@ impl FromRequest for Authorized {
     fn from_request(req: &HttpRequest, payload: &mut actix_web::dev::Payload) -> Self::Future {
         ready((|| {
             use AuthorizationError::*;
-            let (user, fallback_err) = match AuthorizedNoCheck::from_request(req, payload).into_inner() {
-                Ok(AuthorizedNoCheck(user)) => (Some(user), None),
-                Err(Unauthorized(err)) => (None, Some(err)),
-                Err(Database(err)) => return Err(Database(err)),
-            };
+            let (user, fallback_err) =
+                match AuthorizedNoCheck::from_request(req, payload).into_inner() {
+                    Ok(AuthorizedNoCheck(user)) => (Some(user), None),
+                    Err(Unauthorized(err)) => (None, Some(err)),
+                    Err(Database(err)) => return Err(Database(err)),
+                };
             if allowed_and_log(req, user.as_ref())? {
                 Ok(Self(user))
             } else {
-                Err(Unauthorized(fallback_err.unwrap_or_else(|| UnauthorizedError::logged_in(user.unwrap()))))
+                Err(Unauthorized(fallback_err.unwrap_or_else(|| {
+                    UnauthorizedError::logged_in(user.unwrap())
+                })))
             }
         })())
     }
@@ -320,16 +354,18 @@ pub struct FancyError<E: ResponseError + RenderError>(pub E);
 impl<T, E> FromRequest for Fancy<T>
 where
     T: FromRequest<Future = Ready<Result<T, E>>, Error = E>,
-    E: ResponseError + RenderError + 'static
+    E: ResponseError + RenderError + 'static,
 {
     type Error = FancyError<T::Error>;
     type Future = Ready<Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, payload: &mut actix_web::dev::Payload) -> Self::Future {
-        ready(T::from_request(req, payload)
-            .into_inner()
-            .map(|ok| Self(ok))
-            .map_err(|err| FancyError(err)))
+        ready(
+            T::from_request(req, payload)
+                .into_inner()
+                .map(|ok| Self(ok))
+                .map_err(|err| FancyError(err)),
+        )
     }
 }
 
@@ -353,7 +389,7 @@ pub trait RenderError {
 
 impl<T> RenderError for T
 where
-    T: Render
+    T: Render,
 {
     fn render(&self) -> Markup {
         self.render()
@@ -376,7 +412,8 @@ impl<T: ResponseError + RenderError> ResponseError for FancyError<T> {
             .error_response()
             .set_body(page(self.render()))
             .map_into_boxed_body();
-        res.headers_mut().insert(CONTENT_TYPE, ContentType::html().try_into_value().unwrap());
+        res.headers_mut()
+            .insert(CONTENT_TYPE, ContentType::html().try_into_value().unwrap());
         res
     }
 }
