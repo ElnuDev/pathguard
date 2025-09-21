@@ -223,7 +223,7 @@ fn allowed_and_log(req: &HttpRequest, user: Option<&User>) -> database::Result<b
                     .and_then(|allowed| path
                         .starts_with(&rule.path)
                         .then_some(allowed)))
-                .last()
+                .next_back()
                 .unwrap_or_default()
         };
         {
@@ -254,7 +254,7 @@ impl FromRequest for AuthorizedNoCheck {
         ready((|| {
             use AuthorizationError::*;
             let MaybeSessionUserCookies(Some(SessionUserCookies { username, password })) = MaybeSessionUserCookies::from_request(req, payload).into_inner().unwrap() else {
-                return Err(Unauthorized(UnauthorizedError::not_logged_in(&req)));
+                return Err(Unauthorized(UnauthorizedError::not_logged_in(req)));
             };
             let user = match DATABASE.run(|conn| {
                 use crate::schema::users::dsl::*;
@@ -264,8 +264,8 @@ impl FromRequest for AuthorizedNoCheck {
                     .get_result::<User>(conn)
                     .optional()
             })? {
-                Some(user) => if *user.password == *password { user } else { return Err(Unauthorized(UnauthorizedError::bad_login(&req))) },
-                None => return Err(Unauthorized(UnauthorizedError::not_logged_in(&req))),
+                Some(user) => if *user.password == *password { user } else { return Err(Unauthorized(UnauthorizedError::bad_login(req))) },
+                None => return Err(Unauthorized(UnauthorizedError::not_logged_in(req))),
             };
             Ok(Self(user))
         })())

@@ -53,15 +53,15 @@ impl DerefMut for DbIpAddr {
     }
 }
 
-impl Into<DbIpAddr> for IpAddr {
-    fn into(self) -> DbIpAddr {
-        DbIpAddr(self)
+impl From<IpAddr> for DbIpAddr {
+    fn from(val: IpAddr) -> Self {
+        DbIpAddr(val)
     }
 }
 
-impl Into<IpAddr> for DbIpAddr {
-    fn into(self) -> IpAddr {
-        self.0
+impl From<DbIpAddr> for IpAddr {
+    fn from(val: DbIpAddr) -> Self {
+        val.0
     }
 }
 

@@ -369,7 +369,7 @@ pub async fn patch_user(
     path: web::Path<String>,
 ) -> Result<HttpResponse, UserError> {
     let UserForm { password, mut groups } = match UserForm::deserialize(&form) {
-        Ok(form) => form.into(),
+        Ok(form) => form,
         Err(err) => return Ok(ErrorBadRequest(err).error_response()),
     };
     let name = path.into_inner();
@@ -575,7 +575,7 @@ pub async fn delete_group(
     path: web::Path<String>,
 ) -> database::Result<HttpResponse> {
     let name = path.into_inner();
-    if &name == DEFAULT_GROUP {
+    if name == DEFAULT_GROUP {
         return Ok(ErrorForbidden("can't delete default group").error_response());
     }
     if DATABASE.run(|conn| {
@@ -620,8 +620,7 @@ const QUERY_REDIRECT: &str = "r";
 pub async fn logout(req: HttpRequest, htmx: Htmx) -> impl Responder {
     let redirect = req.headers()
         .get(REFERER)
-        .map(|header| header.to_str().ok())
-        .flatten()
+        .and_then(|header| header.to_str().ok())
         .unwrap_or(&ARGS.dashboard)
         .to_owned();
     let mut res = if htmx.is_htmx {
@@ -708,8 +707,7 @@ impl FromRequest for LoginReturnUri {
         fn from_headers(req: &HttpRequest) -> Option<&str> {
             req.headers()
                 .get(REFERER)
-                .map(|header| header.to_str().ok())
-                .flatten()
+                .and_then(|header| header.to_str().ok())
         }
         fn from_query(req: &HttpRequest) -> Option<String> {
             let qstring = qstring::QString::from(req.query_string());
@@ -719,11 +717,11 @@ impl FromRequest for LoginReturnUri {
             if req.headers().contains_key("hx-request") {
                 from_headers(req)
                     .map(|uri| Some(Cow::Borrowed(uri)))
-                    .unwrap_or_else(|| from_query(req).map(|uri| Cow::Owned(uri)))
+                    .unwrap_or_else(|| from_query(req).map(Cow::Owned))
             } else {
                 from_query(req)
                     .map(|uri| Some(Cow::Owned(uri)))
-                    .unwrap_or_else(|| from_headers(req).map(|uri| Cow::Borrowed(uri)))
+                    .unwrap_or_else(|| from_headers(req).map(Cow::Borrowed))
             }
             .unwrap_or(Cow::Borrowed("/"))
             .into_owned()

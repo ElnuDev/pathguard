@@ -34,7 +34,7 @@ pub async fn proxy(
         format!("http://127.0.0.1:{}{}", 1313, req.uri()),
         req.head(),
     );
-    let res = forwarded_req.send_body(body).await.map_err(|err| ProxyError::SendRequest(err))?;
+    let res = forwarded_req.send_body(body).await.map_err(ProxyError::SendRequest)?;
     let mut client_res = {
         let mut builder = HttpResponse::build(res.status());
         for (key, value) in res.headers() {
