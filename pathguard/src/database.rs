@@ -2,8 +2,8 @@ use actix_web::{http::StatusCode, ResponseError};
 use diesel::insert_or_ignore_into;
 use diesel::prelude::*;
 use diesel::r2d2::ConnectionManager;
-use maud::Render;
 use maud::html;
+use maud::Render;
 use r2d2::{Pool, PooledConnection};
 use thiserror::Error;
 

@@ -1,13 +1,25 @@
-use std::{fs::{self, DirEntry}, io, path::Path};
+use std::{
+    fs::{self, DirEntry},
+    io,
+    path::Path,
+};
 
 use actix_files::NamedFile;
 use actix_htmx::Htmx;
-use actix_web::{HttpRequest, HttpResponse, Responder, ResponseError, http::StatusCode, web::Redirect};
-use chrono::{DateTime, Utc, Timelike};
-use maud::{PreEscaped, Render, html};
+use actix_web::{
+    http::StatusCode, web::Redirect, HttpRequest, HttpResponse, Responder, ResponseError,
+};
+use chrono::{DateTime, Timelike, Utc};
+use maud::{html, PreEscaped, Render};
 use thiserror::Error;
 
-use crate::{DATABASE, auth::{Fancy, FancyError, Unauthorized, UnauthorizedError, user_rules, user_rules_allowed}, database, models::group::Rule, templates::{const_icon, page}};
+use crate::{
+    auth::{user_rules, user_rules_allowed, Fancy, FancyError, Unauthorized, UnauthorizedError},
+    database,
+    models::group::Rule,
+    templates::{const_icon, page},
+    DATABASE,
+};
 
 #[derive(Error, Debug)]
 pub enum FilesError {
@@ -31,15 +43,15 @@ impl ResponseError for FilesError {
                 io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
                 io::ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
                 io::ErrorKind::ConnectionRefused
-                    | io::ErrorKind::ConnectionReset
-                    | io::ErrorKind::HostUnreachable
-                    | io::ErrorKind::NetworkUnreachable
-                    | io::ErrorKind::ConnectionAborted
-                    | io::ErrorKind::NotConnected
-                    | io::ErrorKind::NetworkDown
-                    | io::ErrorKind::WouldBlock
-                    | io::ErrorKind::StaleNetworkFileHandle
-                    | io::ErrorKind::TimedOut => StatusCode::SERVICE_UNAVAILABLE,
+                | io::ErrorKind::ConnectionReset
+                | io::ErrorKind::HostUnreachable
+                | io::ErrorKind::NetworkUnreachable
+                | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::NotConnected
+                | io::ErrorKind::NetworkDown
+                | io::ErrorKind::WouldBlock
+                | io::ErrorKind::StaleNetworkFileHandle
+                | io::ErrorKind::TimedOut => StatusCode::SERVICE_UNAVAILABLE,
                 io::ErrorKind::ResourceBusy => StatusCode::LOCKED,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             },
@@ -87,17 +99,26 @@ pub async fn files(
     root: &Path,
 ) -> Result<HttpResponse, FancyError<FilesError>> {
     let path = root.join(req.path().trim_start_matches("/"));
-    if !path.canonicalize().map_err(|err| FancyError(err.into()))?.starts_with(root) {
+    if !path
+        .canonicalize()
+        .map_err(|err| FancyError(err.into()))?
+        .starts_with(root)
+    {
         return Err(FancyError(FilesError::OutOfScope));
     }
-    let is_admin = user.as_ref().map(|user| user.is_admin()).unwrap_or_default();
+    let is_admin = user
+        .as_ref()
+        .map(|user| user.is_admin())
+        .unwrap_or_default();
     Ok(match path.is_dir() {
         false => {
-            if !is_admin && !user_rules_allowed(
-                &DATABASE
+            if !is_admin
+                && !user_rules_allowed(
+                    &DATABASE
                         .run(|conn| user_rules(conn, user.as_ref()))
                         .map_err(|err| FancyError(FilesError::Database(err)))?,
-                    req.path())
+                    req.path(),
+                )
             {
                 return Err(FancyError(FilesError::Unauthorized(fallback_err)));
             }
@@ -105,7 +126,7 @@ pub async fn files(
                 .map_err(|err| FancyError(FilesError::Io(err)))?
                 .prefer_utf8(true)
                 .into_response(&req)
-        },
+        }
         true => {
             if !req.path().ends_with("/") {
                 let redirect = req.path().to_string() + "/";
@@ -121,11 +142,13 @@ pub async fn files(
             let rules: Option<Vec<Rule>> = if is_admin {
                 None
             } else {
-                Some(DATABASE
-                    .run(|conn| user_rules(conn, user.as_ref()))
-                    .map_err(|err| FancyError(FilesError::Database(err)))?
-                    .into_iter()
-                    .collect())
+                Some(
+                    DATABASE
+                        .run(|conn| user_rules(conn, user.as_ref()))
+                        .map_err(|err| FancyError(FilesError::Database(err)))?
+                        .into_iter()
+                        .collect(),
+                )
             };
 
             const HOME_: &str = "home";
@@ -146,15 +169,25 @@ pub async fn files(
                     let name = entry
                         .file_name()
                         .to_str()
-                        .filter(|name| !name.starts_with(".") && rules
-                            .as_ref()
-                            .map(|rules| user_rules_allowed(rules, &(req.path().to_owned() + name)))
-                            .unwrap_or(true))
+                        .filter(|name| {
+                            !name.starts_with(".")
+                                && rules
+                                    .as_ref()
+                                    .map(|rules| {
+                                        user_rules_allowed(rules, &(req.path().to_owned() + name))
+                                    })
+                                    .unwrap_or(true)
+                        })
                         .map(|str| str.to_owned());
                     name.map(|name| (entry, name))
                 })
                 .collect();
-            if entries.is_empty() && rules.as_ref().map(|rules| !user_rules_allowed(rules, req.path())).unwrap_or_default() {
+            if entries.is_empty()
+                && rules
+                    .as_ref()
+                    .map(|rules| !user_rules_allowed(rules, req.path()))
+                    .unwrap_or_default()
+            {
                 return Err(FancyError(fallback_err.into()));
             }
 
@@ -224,6 +257,6 @@ pub async fn files(
                     }
                 }
             }))
-        },
+        }
     })
 }

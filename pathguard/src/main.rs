@@ -3,9 +3,9 @@
 
 mod auth;
 mod dashboard;
+mod files;
 mod models;
 mod proxy;
-mod files;
 mod templates;
 
 mod database;
@@ -16,7 +16,11 @@ use std::{env, path::PathBuf};
 use actix_htmx::{Htmx, HtmxMiddleware};
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
 use actix_web::{
-    App, HttpRequest, HttpResponse, HttpServer, cookie::Key, http::header::{CONTENT_TYPE, HeaderValue}, middleware::{self}, mime::TEXT_HTML_UTF_8, web
+    cookie::Key,
+    http::header::{HeaderValue, CONTENT_TYPE},
+    middleware::{self},
+    mime::TEXT_HTML_UTF_8,
+    web, App, HttpRequest, HttpResponse, HttpServer,
 };
 use maud::html;
 
@@ -24,11 +28,14 @@ use clap::{Parser, Subcommand};
 use passwords::PasswordGenerator;
 
 use crate::{
-    auth::{Authorized, Fancy, Unauthorized}, dashboard::{
+    auth::{Authorized, Fancy, Unauthorized},
+    dashboard::{
         dashboard, delete_group, delete_rule, delete_user, get_groups, get_user, get_user_edit,
         get_user_groups, logout, patch_rule, patch_user, post_group, post_login, post_rule,
         post_user,
-    }, database::Database, templates::page
+    },
+    database::Database,
+    templates::page,
 };
 
 #[derive(Subcommand, Debug, Clone)]

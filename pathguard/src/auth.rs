@@ -13,7 +13,7 @@ use r2d2::PooledConnection;
 use std::{
     convert::Infallible,
     fmt::Debug,
-    future::{self, Ready, ready},
+    future::{self, ready, Ready},
     ops::{Deref, DerefMut},
 };
 use thiserror::Error;
@@ -206,7 +206,7 @@ impl ResponseError for AuthorizationError {
 
 pub fn user_rules(
     conn: &mut PooledConnection<ConnectionManager<SqliteConnection>>,
-    user: Option<&User>
+    user: Option<&User>,
 ) -> Result<Vec<Rule>, diesel::result::Error> {
     if let Some(user) = user {
         use crate::schema::{
@@ -321,14 +321,23 @@ impl FromRequest for Unauthorized {
 
     fn from_request(req: &HttpRequest, payload: &mut actix_web::dev::Payload) -> Self::Future {
         use AuthorizationError::*;
-        ready((|| Ok(match AuthorizedNoCheck::from_request(req, payload).into_inner() {
-            Ok(AuthorizedNoCheck(user)) => Self {
-                fallback_err: UnauthorizedError::LoggedIn { username: user.name.clone() },
-                user: Some(user),
-            },
-            Err(Unauthorized(err)) => Self { user: None, fallback_err: err },
-            Err(Database(err)) => return Err(err),
-        }))())
+        ready((|| {
+            Ok(
+                match AuthorizedNoCheck::from_request(req, payload).into_inner() {
+                    Ok(AuthorizedNoCheck(user)) => Self {
+                        fallback_err: UnauthorizedError::LoggedIn {
+                            username: user.name.clone(),
+                        },
+                        user: Some(user),
+                    },
+                    Err(Unauthorized(err)) => Self {
+                        user: None,
+                        fallback_err: err,
+                    },
+                    Err(Database(err)) => return Err(err),
+                },
+            )
+        })())
     }
 }
 

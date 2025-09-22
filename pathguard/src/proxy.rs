@@ -31,10 +31,8 @@ pub async fn proxy(
 ) -> Result<HttpResponse, FancyError<ProxyError>> {
     // We want to pass redirect headers to the client, not follow them ourselves
     let client = Client::builder().disable_redirects().finish();
-    let forwarded_req = client.request_from(
-        format!("http://127.0.0.1:{port}{}", req.uri()),
-        req.head(),
-    );
+    let forwarded_req =
+        client.request_from(format!("http://127.0.0.1:{port}{}", req.uri()), req.head());
     let res = forwarded_req
         .send_body(body)
         .await
