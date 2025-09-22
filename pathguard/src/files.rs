@@ -148,13 +148,13 @@ pub async fn files(
                         .to_str()
                         .filter(|name| !name.starts_with(".") && rules
                             .as_ref()
-                            .map(|rules| user_rules_allowed(&rules, &(req.path().to_owned() + name)))
+                            .map(|rules| user_rules_allowed(rules, &(req.path().to_owned() + name)))
                             .unwrap_or(true))
                         .map(|str| str.to_owned());
                     name.map(|name| (entry, name))
                 })
                 .collect();
-            if entries.is_empty() && rules.as_ref().map(|rules| !user_rules_allowed(&rules, req.path())).unwrap_or_default() {
+            if entries.is_empty() && rules.as_ref().map(|rules| !user_rules_allowed(rules, req.path())).unwrap_or_default() {
                 return Err(FancyError(fallback_err.into()));
             }
 
