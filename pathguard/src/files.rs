@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, DirEntry},
+    fs::{self, DirEntry, Metadata},
     io,
     path::Path,
 };
@@ -160,7 +160,7 @@ pub async fn files(
             const FOLDER_: &str = "folder";
             const FOLDER: &str = FOLDER_;
 
-            let entries: Vec<(DirEntry, String)> = fs::read_dir(path)
+            let mut entries: Vec<(fs::Metadata, String)> = fs::read_dir(path)
                 .map_err(|err| FancyError(err.into()))?
                 .collect::<Result<Vec<DirEntry>, io::Error>>()
                 .map_err(|err| FancyError(err.into()))?
@@ -181,7 +181,12 @@ pub async fn files(
                         .map(|str| str.to_owned());
                     name.map(|name| (entry, name))
                 })
-                .collect();
+                .map(|(entry, name)| fs::metadata(entry.path())
+                    .map(|metadata| (metadata, name)))
+                .collect::<io::Result<Vec<(fs::Metadata, String)>>>()
+                .map_err(|err| FancyError(err.into()))?;
+            entries.sort_by(|(a_metadata, a_name), (b_metadata, b_name)|
+                (!a_metadata.is_dir(), a_name).cmp(&(!b_metadata.is_dir(), b_name)));
             if entries.is_empty()
                 && rules
                     .as_ref()
@@ -232,9 +237,8 @@ pub async fn files(
                     @if entries.is_empty() {
                         em { "Empty" }
                     } @else {
-                        @for (entry, name) in entries.iter() {
+                        @for (metadata, name) in entries.iter() {
                             li {
-                                @let metadata = fs::metadata(entry.path()).map_err(|err| FancyError(FilesError::Io(err)))?;
                                 @let is_dir = metadata.is_dir();
                                 a.warn[is_dir]
                                     hx-boost=[(!is_dir).then_some("false")]
