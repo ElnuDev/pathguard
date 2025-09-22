@@ -10,11 +10,12 @@ use actix_web::{
     HttpRequest, HttpResponse, Responder, ResponseError, http::StatusCode, web::Redirect
 };
 use chrono::{DateTime, Timelike, Utc};
+use diesel::{RunQueryDsl, dsl::insert_into};
 use maud::{html, PreEscaped, Render};
 use thiserror::Error;
 
 use crate::{
-    DATABASE, auth::{Fancy, FancyError, Unauthorized, UnauthorizedError, user_rules, user_rules_allowed}, database::DatabaseError, models::group::Rule, templates::{const_icon, page}
+    DATABASE, auth::{Fancy, FancyError, Unauthorized, UnauthorizedError, user_rules, user_rules_allowed}, database::DatabaseError, models::{Activity, group::Rule}, templates::{const_icon, page}
 };
 
 #[derive(Error, Debug)]
@@ -112,8 +113,24 @@ pub async fn files(
     htmx: Htmx,
     root: &Path,
 ) -> Result<HttpResponse, FancyError<FilesError>> {
+    // Get request timestamp before database ops
+    let timestamp = Utc::now().naive_utc();
+    let log_activity = |allowed| DATABASE.run(|conn| {
+        use crate::schema::activities::dsl::activities;
+        insert_into(activities)
+            .values(Activity {
+                user: user.as_ref().map(|user| user.name.clone()),
+                timestamp,
+                path: req.path().to_string(),
+                allowed,
+                ..Activity::from_request(&req)
+            })
+            .execute(conn)
+    });
+
     let path = root.join(req.path().trim_start_matches("/"));
     if !path.canonicalize()?.starts_with(root) {
+        log_activity(false)?;
         return Err(FancyError(FilesError::OutOfScope));
     }
     let is_admin = user
@@ -129,19 +146,18 @@ pub async fn files(
                     req.path(),
                 )
             {
+                log_activity(false)?;
                 return Err(fallback_err.into());
             }
+            log_activity(true)?;
             NamedFile::open(path)?
                 .prefer_utf8(true)
                 .into_response(&req)
         }
         true => {
-            match NamedFile::open(path.join("index.html")) {
-                Ok(file) => return Ok(file.prefer_utf8(true).into_response(&req)),
-                Err(err) if err.kind() == io::ErrorKind::NotFound => {},
-                Err(err) => return Err(err.into()),
-            }
-            if !req.path().ends_with("/") {
+            let index = path.join("index.html");
+            let index_exists = fs::exists(&index)?;
+            if !index_exists && !req.path().ends_with("/") {
                 let redirect = req.path().to_string() + "/";
                 return Ok(if htmx.is_htmx {
                     htmx.redirect(redirect);
@@ -162,6 +178,15 @@ pub async fn files(
                         .collect(),
                 )
             };
+            if index_exists && rules.as_ref().map(|rules| user_rules_allowed(rules, req.path())).unwrap_or(true) {
+                log_activity(true)?;
+                match NamedFile::open(index) {
+                    Ok(file) => return Ok(file.prefer_utf8(true).into_response(&req)),
+                    // This is unreachable because we already checked
+                    //Err(err) if err.kind() == io::ErrorKind::NotFound => {},
+                    Err(err) => return Err(err.into()),
+                }
+            }
 
             const HOME_: &str = "home";
             const HOME: &str = HOME_;
@@ -205,8 +230,10 @@ pub async fn files(
                     .map(|rules| !user_rules_allowed(rules, req.path()))
                     .unwrap_or_default()
             {
+                log_activity(false)?;
                 return Err(FancyError(fallback_err.into()));
             }
+            log_activity(true)?;
 
             fn boosted_dir(is_dir: bool, path: &Path) -> io::Result<Option<&str>> {
                 Ok((!is_dir || fs::exists(path.join("index.html"))?).then_some("false"))
