@@ -139,7 +139,15 @@ pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpRe
                     tr.bg[!activity.allowed].color[!activity.allowed].bad[!activity.allowed] {
                         td { @if let Some(user) = &activity.user { a href={ "#" (user) } { (user) } } }
                         td { (activity.ip.deref()) }
-                        td { (activity.path) }
+                        td {
+                            a
+                                target="_blank"
+                                href=(activity.path)
+                                hx-boost="false"
+                            {
+                                (activity.path)
+                            }
+                        }
                         td { (timestamp(&activity.timestamp)) }
                     }
                 }
