@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, DirEntry, Metadata},
+    fs::{self, DirEntry},
     io,
     path::{Path, PathBuf},
 };
@@ -7,18 +7,14 @@ use std::{
 use actix_files::NamedFile;
 use actix_htmx::Htmx;
 use actix_web::{
-    HttpRequest, HttpResponse, Responder, ResponseError, http::StatusCode, mime::HTML, web::Redirect
+    HttpRequest, HttpResponse, Responder, ResponseError, http::StatusCode, web::Redirect
 };
 use chrono::{DateTime, Timelike, Utc};
 use maud::{html, PreEscaped, Render};
 use thiserror::Error;
 
 use crate::{
-    auth::{user_rules, user_rules_allowed, Fancy, FancyError, Unauthorized, UnauthorizedError},
-    database,
-    models::group::Rule,
-    templates::{const_icon, page},
-    DATABASE,
+    DATABASE, auth::{Fancy, FancyError, Unauthorized, UnauthorizedError, user_rules, user_rules_allowed}, database::DatabaseError, models::group::Rule, templates::{const_icon, page}
 };
 
 #[derive(Error, Debug)]
@@ -28,9 +24,27 @@ pub enum FilesError {
     #[error("Path out of scope of served directory")]
     OutOfScope,
     #[error("{0}")]
-    Database(#[from] database::DatabaseError),
+    Database(#[from] DatabaseError),
     #[error("{0}")]
     Io(#[from] io::Error),
+}
+
+impl From<UnauthorizedError> for FancyError<FilesError> {
+    fn from(value: UnauthorizedError) -> Self {
+        Self(value.into())
+    }
+}
+
+impl From<DatabaseError> for FancyError<FilesError> {
+    fn from(value: DatabaseError) -> Self {
+        Self(value.into())
+    }
+}
+
+impl From<io::Error> for FancyError<FilesError> {
+    fn from(value: io::Error) -> Self {
+        Self(value.into())
+    }
 }
 
 impl ResponseError for FilesError {
@@ -99,11 +113,7 @@ pub async fn files(
     root: &Path,
 ) -> Result<HttpResponse, FancyError<FilesError>> {
     let path = root.join(req.path().trim_start_matches("/"));
-    if !path
-        .canonicalize()
-        .map_err(|err| FancyError(err.into()))?
-        .starts_with(root)
-    {
+    if !path.canonicalize()?.starts_with(root) {
         return Err(FancyError(FilesError::OutOfScope));
     }
     let is_admin = user
@@ -115,15 +125,13 @@ pub async fn files(
             if !is_admin
                 && !user_rules_allowed(
                     &DATABASE
-                        .run(|conn| user_rules(conn, user.as_ref()))
-                        .map_err(|err| FancyError(err.into()))?,
+                        .run(|conn| user_rules(conn, user.as_ref()))?,
                     req.path(),
                 )
             {
-                return Err(FancyError(fallback_err.into()));
+                return Err(fallback_err.into());
             }
-            NamedFile::open(path)
-                .map_err(|err| FancyError(err.into()))?
+            NamedFile::open(path)?
                 .prefer_utf8(true)
                 .into_response(&req)
         }
@@ -131,7 +139,7 @@ pub async fn files(
             match NamedFile::open(path.join("index.html")) {
                 Ok(file) => return Ok(file.prefer_utf8(true).into_response(&req)),
                 Err(err) if err.kind() == io::ErrorKind::NotFound => {},
-                Err(err) => return Err(FancyError(err.into())),
+                Err(err) => return Err(err.into()),
             }
             if !req.path().ends_with("/") {
                 let redirect = req.path().to_string() + "/";
@@ -149,8 +157,7 @@ pub async fn files(
             } else {
                 Some(
                     DATABASE
-                        .run(|conn| user_rules(conn, user.as_ref()))
-                        .map_err(|err| FancyError(err.into()))?
+                        .run(|conn| user_rules(conn, user.as_ref()))?
                         .into_iter()
                         .collect(),
                 )
@@ -165,10 +172,8 @@ pub async fn files(
             const FOLDER_: &str = "folder";
             const FOLDER: &str = FOLDER_;
 
-            let mut entries: Vec<(PathBuf, fs::Metadata, String)> = fs::read_dir(path)
-                .map_err(|err| FancyError(err.into()))?
-                .collect::<Result<Vec<DirEntry>, io::Error>>()
-                .map_err(|err| FancyError(err.into()))?
+            let mut entries: Vec<(PathBuf, fs::Metadata, String)> = fs::read_dir(path)?
+                .collect::<Result<Vec<DirEntry>, io::Error>>()?
                 .into_iter()
                 .filter_map(|entry| {
                     let name = entry
@@ -191,8 +196,7 @@ pub async fn files(
                     fs::metadata(&path)
                         .map(|metadata| (path, metadata, name))
                 })
-                .collect::<io::Result<Vec<(PathBuf, fs::Metadata, String)>>>()
-                .map_err(|err| FancyError(err.into()))?;
+                .collect::<io::Result<Vec<(PathBuf, fs::Metadata, String)>>>()?;
             entries.sort_by(|(_a_path, a_metadata, a_name), (_b_path, b_metadata, b_name)|
                 (!a_metadata.is_dir(), a_name).cmp(&(!b_metadata.is_dir(), b_name)));
             if entries.is_empty()
@@ -227,7 +231,7 @@ pub async fn files(
                             @let mut path = root.to_owned();
                             li {
                                 a.warn
-                                    hx-boost=[boosted_dir(true, &path).map_err(|err| FancyError(err.into()))?]
+                                    hx-boost=[boosted_dir(true, &path)?]
                                     href="/"
                                 { (const_icon!(HOME)) " Home" }
                             }
@@ -237,7 +241,7 @@ pub async fn files(
                                 li {
                                     @let _ = { path.push(comp); };
                                     a.warn
-                                        hx-boost=[boosted_dir(true, &path).map_err(|err| FancyError(err.into()))?]
+                                        hx-boost=[boosted_dir(true, &path)?]
                                         href={ ({ link.push('/'); link.push_str(comp); &link }) "/" }
                                     {
                                         (const_icon!(FOLDER)) " " (comp)
@@ -263,7 +267,7 @@ pub async fn files(
                             li {
                                 @let is_dir = metadata.is_dir();
                                 a.warn[is_dir]
-                                    hx-boost=[boosted_dir(is_dir, &path).map_err(|err| FancyError(err.into()))?]
+                                    hx-boost=[boosted_dir(is_dir, &path)?]
                                     href={ (name) @if is_dir { "/" } }
                                     target=[(!is_dir).then_some("_blank")]
                                 {
@@ -276,7 +280,7 @@ pub async fn files(
                                     (name)
                                 }
                                 span.float:right { ({
-                                    let created: DateTime<Utc> = metadata.created().map_err(|err| FancyError(err.into()))?.into();
+                                    let created: DateTime<Utc> = metadata.created()?.into();
                                     created.with_nanosecond(0).unwrap()
                                 }) }
                             }
