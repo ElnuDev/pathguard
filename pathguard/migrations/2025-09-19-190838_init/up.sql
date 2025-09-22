@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS user_groups (
 
 CREATE TABLE IF NOT EXISTS rules (
 	sort		INTEGER NOT NULL,
-	[group]		TEXT NOT NULL REFERENCES groups(name),
+	[group]		TEXT NOT NULL REFERENCES groups(name) ON DELETE CASCADE,
 	allowed		BOOLEAN,
 	path		TEXT NOT NULL,
 	PRIMARY KEY	([group], path)
