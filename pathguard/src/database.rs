@@ -2,6 +2,8 @@ use actix_web::{http::StatusCode, ResponseError};
 use diesel::insert_or_ignore_into;
 use diesel::prelude::*;
 use diesel::r2d2::ConnectionManager;
+use diesel_migrations::MigrationHarness;
+use diesel_migrations::{EmbeddedMigrations, embed_migrations};
 use maud::html;
 use maud::Render;
 use r2d2::{Pool, PooledConnection};
@@ -48,6 +50,7 @@ impl ResponseError for DatabaseError {
 }
 
 pub type Result<T> = std::result::Result<T, DatabaseError>;
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
 impl Database {
     pub fn new(path: &str) -> Result<Self> {
@@ -58,6 +61,7 @@ impl Database {
             .expect("Could not build connection pool");
         let this = Self { connection_pool };
         this.run(|conn| {
+            conn.run_pending_migrations(MIGRATIONS).unwrap();
             {
                 use crate::schema::users::dsl;
                 insert_or_ignore_into(dsl::users)
