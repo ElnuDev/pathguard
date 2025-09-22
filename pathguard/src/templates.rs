@@ -21,7 +21,7 @@ pub fn fancy_page(before_main: Markup, main: Markup) -> String {
                     (main)
                 }
                 footer {
-                    p { "Simple and easy path protection by " a href="/pathguard" { "pathguard" } "." }
+                    p { "Simple and easy path protection by " a target="_blank" href="https://github.com/ElnuDev/pathguard" { "pathguard" } "." }
                 }
             }
         }
