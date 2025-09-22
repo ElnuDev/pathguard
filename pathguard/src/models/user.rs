@@ -6,11 +6,7 @@ use std::{
 };
 
 use crate::{
-    dashboard::{groups_select, CHECK, PENCIL_SQUARE, TRASH, X_MARK},
-    database::{self},
-    models::{group::group_id, Group},
-    templates::icon_button,
-    ARGS, DATABASE, USERS_ROUTE,
+    ARGS, DATABASE, USERS_ROUTE, dashboard::{CHECK, PENCIL_SQUARE, TRASH, X_MARK, groups_select, timestamp}, database::{self}, models::{Group, group::group_id}, templates::icon_button
 };
 
 pub const ADMIN_USERNAME: &str = "admin";
@@ -206,12 +202,12 @@ impl UserWithGroups {
                 }
                 div {
                     dt { "Created:" }
-                    dd { (created) }
+                    dd { (timestamp(&created)) }
                 }
                 @if name != ADMIN_USERNAME {
                     div {
                         dt { "Last active:" }
-                        dd { @if let Some(when) = last_active { (when) } @else { "Never" } }
+                        dd { @if let Some(when) = last_active { (timestamp(&when)) } @else { "Never" } }
                     }
                 }
             }

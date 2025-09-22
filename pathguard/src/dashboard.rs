@@ -19,6 +19,8 @@ use actix_web::{
     FromRequest, HttpRequest, HttpResponse, Responder, ResponseError,
 };
 use awc::http::StatusCode;
+use chrono::NaiveDateTime;
+use chrono_humanize::HumanTime;
 use diesel::{
     dsl::{delete, exists, insert_into, max},
     prelude::*,
@@ -46,6 +48,13 @@ pub const CHECK: &str = CHECK_;
 
 const X_MARK_: &str = "x-mark";
 pub const X_MARK: &str = X_MARK_;
+
+pub fn timestamp(utc: &NaiveDateTime) -> Markup {
+    html! {
+        @let datetime = utc.and_utc();
+        time datetime=(datetime) title=(datetime) { (HumanTime::from(datetime)) }
+    }
+}
 
 pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpResponse> {
     const ACTIVITY_LIMIT: i64 = 100;
@@ -128,10 +137,10 @@ pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpRe
             tbody {
                 @for activity in activities {
                     tr.bg[!activity.allowed].color[!activity.allowed].bad[!activity.allowed] {
-                        td { @if let Some(user) = activity.user { a href={ "#" (user) } { (user) } } }
+                        td { @if let Some(user) = &activity.user { a href={ "#" (user) } { (user) } } }
                         td { (activity.ip.deref()) }
                         td { (activity.path) }
-                        td { (activity.timestamp) }
+                        td { (timestamp(&activity.timestamp)) }
                     }
                 }
             }
