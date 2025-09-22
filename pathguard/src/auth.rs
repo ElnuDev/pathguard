@@ -230,7 +230,7 @@ pub fn user_rules(
     }
 }
 
-pub fn user_rules_allowed(rules: &Vec<Rule>, path: &str) -> bool {
+pub fn user_rules_allowed(rules: &[Rule], path: &str) -> bool {
     rules
         .iter()
         .filter_map(|rule| {
