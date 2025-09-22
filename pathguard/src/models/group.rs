@@ -119,7 +119,12 @@ impl Group {
                         hx-on::after-request="this.querySelector('input').value = ''"
                     {
                         div { (const_icon_button!(PLUS, "", "ok")) }
-                        input type="text" name="name" required;
+                        input
+                            type="text"
+                            name="name"
+                            pattern="\\/.*"
+                            title="Must start with a /"
+                            required;
                     }
                 }
             }
