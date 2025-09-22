@@ -1,13 +1,13 @@
 use std::{
     fs::{self, DirEntry, Metadata},
     io,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use actix_files::NamedFile;
 use actix_htmx::Htmx;
 use actix_web::{
-    http::StatusCode, web::Redirect, HttpRequest, HttpResponse, Responder, ResponseError,
+    HttpRequest, HttpResponse, Responder, ResponseError, http::StatusCode, mime::HTML, web::Redirect
 };
 use chrono::{DateTime, Timelike, Utc};
 use maud::{html, PreEscaped, Render};
@@ -116,18 +116,23 @@ pub async fn files(
                 && !user_rules_allowed(
                     &DATABASE
                         .run(|conn| user_rules(conn, user.as_ref()))
-                        .map_err(|err| FancyError(FilesError::Database(err)))?,
+                        .map_err(|err| FancyError(err.into()))?,
                     req.path(),
                 )
             {
-                return Err(FancyError(FilesError::Unauthorized(fallback_err)));
+                return Err(FancyError(fallback_err.into()));
             }
             NamedFile::open(path)
-                .map_err(|err| FancyError(FilesError::Io(err)))?
+                .map_err(|err| FancyError(err.into()))?
                 .prefer_utf8(true)
                 .into_response(&req)
         }
         true => {
+            match NamedFile::open(path.join("index.html")) {
+                Ok(file) => return Ok(file.prefer_utf8(true).into_response(&req)),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {},
+                Err(err) => return Err(FancyError(err.into())),
+            }
             if !req.path().ends_with("/") {
                 let redirect = req.path().to_string() + "/";
                 return Ok(if htmx.is_htmx {
@@ -145,7 +150,7 @@ pub async fn files(
                 Some(
                     DATABASE
                         .run(|conn| user_rules(conn, user.as_ref()))
-                        .map_err(|err| FancyError(FilesError::Database(err)))?
+                        .map_err(|err| FancyError(err.into()))?
                         .into_iter()
                         .collect(),
                 )
@@ -160,7 +165,7 @@ pub async fn files(
             const FOLDER_: &str = "folder";
             const FOLDER: &str = FOLDER_;
 
-            let mut entries: Vec<(fs::Metadata, String)> = fs::read_dir(path)
+            let mut entries: Vec<(PathBuf, fs::Metadata, String)> = fs::read_dir(path)
                 .map_err(|err| FancyError(err.into()))?
                 .collect::<Result<Vec<DirEntry>, io::Error>>()
                 .map_err(|err| FancyError(err.into()))?
@@ -181,11 +186,14 @@ pub async fn files(
                         .map(|str| str.to_owned());
                     name.map(|name| (entry, name))
                 })
-                .map(|(entry, name)| fs::metadata(entry.path())
-                    .map(|metadata| (metadata, name)))
-                .collect::<io::Result<Vec<(fs::Metadata, String)>>>()
+                .map(|(entry, name)| {
+                    let path = entry.path();
+                    fs::metadata(&path)
+                        .map(|metadata| (path, metadata, name))
+                })
+                .collect::<io::Result<Vec<(PathBuf, fs::Metadata, String)>>>()
                 .map_err(|err| FancyError(err.into()))?;
-            entries.sort_by(|(a_metadata, a_name), (b_metadata, b_name)|
+            entries.sort_by(|(_a_path, a_metadata, a_name), (_b_path, b_metadata, b_name)|
                 (!a_metadata.is_dir(), a_name).cmp(&(!b_metadata.is_dir(), b_name)));
             if entries.is_empty()
                 && rules
@@ -194,6 +202,10 @@ pub async fn files(
                     .unwrap_or_default()
             {
                 return Err(FancyError(fallback_err.into()));
+            }
+
+            fn boosted_dir(is_dir: bool, path: &Path) -> io::Result<Option<&str>> {
+                Ok((!is_dir || fs::exists(path.join("index.html"))?).then_some("false"))
             }
 
             HttpResponse::Ok().body(page(html! {
@@ -212,12 +224,22 @@ pub async fn files(
                 @if req.path() != "/" {
                     nav.breadcrumbs aria-label="Breadcrumbs" {
                         ol.margin-start:0 {
-                            li { a.warn href="/" { (const_icon!(HOME)) " Home" } }
+                            @let mut path = root.to_owned();
+                            li {
+                                a.warn
+                                    hx-boost=[boosted_dir(true, &path).map_err(|err| FancyError(err.into()))?]
+                                    href="/"
+                                { (const_icon!(HOME)) " Home" }
+                            }
                             @let mut link = String::new();
                             @let comps: Vec<&str> = req.path().split("/").skip(1).collect();
                             @for comp in comps.iter().rev().skip(2).rev() {
                                 li {
-                                    a.warn href={ ({ link.push('/'); link.push_str(comp); &link }) "/" } {
+                                    @let _ = { path.push(comp); };
+                                    a.warn
+                                        hx-boost=[boosted_dir(true, &path).map_err(|err| FancyError(err.into()))?]
+                                        href={ ({ link.push('/'); link.push_str(comp); &link }) "/" }
+                                    {
                                         (const_icon!(FOLDER)) " " (comp)
                                     }
                                 }
@@ -237,12 +259,13 @@ pub async fn files(
                     @if entries.is_empty() {
                         em { "Empty" }
                     } @else {
-                        @for (metadata, name) in entries.iter() {
+                        @for (path, metadata, name) in entries.iter() {
                             li {
                                 @let is_dir = metadata.is_dir();
                                 a.warn[is_dir]
-                                    hx-boost=[(!is_dir).then_some("false")]
+                                    hx-boost=[boosted_dir(is_dir, &path).map_err(|err| FancyError(err.into()))?]
                                     href={ (name) @if is_dir { "/" } }
+                                    target=[(!is_dir).then_some("_blank")]
                                 {
                                     (if is_dir {
                                         const_icon!(FOLDER)
@@ -253,7 +276,7 @@ pub async fn files(
                                     (name)
                                 }
                                 span.float:right { ({
-                                    let created: DateTime<Utc> = metadata.created().map_err(|err| FancyError(FilesError::Io(err)))?.into();
+                                    let created: DateTime<Utc> = metadata.created().map_err(|err| FancyError(err.into()))?.into();
                                     created.with_nanosecond(0).unwrap()
                                 }) }
                             }
