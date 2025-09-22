@@ -640,7 +640,6 @@ pub async fn logout(req: HttpRequest, htmx: Htmx) -> impl Responder {
         HttpResponse::Ok().finish()
     } else {
         Redirect::to(redirect)
-            .temporary()
             .respond_to(&req)
             .map_into_boxed_body()
     };

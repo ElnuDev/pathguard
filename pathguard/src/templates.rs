@@ -39,12 +39,12 @@ macro_rules! const_icon_raw {
 }
 pub(crate) use const_icon_raw;
 
-#[allow(unused)]
 macro_rules! const_icon {
     ($name:expr) => {
-        PreEscaped(icon_raw!($name))
+        PreEscaped(crate::templates::const_icon_raw!($name))
     };
 }
+pub(crate) use const_icon;
 
 pub fn icon(name: &str) -> Markup {
     html! {

@@ -27,11 +27,12 @@ pub async fn proxy(
     _auth: Fancy<Authorized>,
     req: HttpRequest,
     body: web::Bytes,
+    port: u16,
 ) -> Result<HttpResponse, FancyError<ProxyError>> {
     // We want to pass redirect headers to the client, not follow them ourselves
     let client = Client::builder().disable_redirects().finish();
     let forwarded_req = client.request_from(
-        format!("http://127.0.0.1:{}{}", 1313, req.uri()),
+        format!("http://127.0.0.1:{port}{}", req.uri()),
         req.head(),
     );
     let res = forwarded_req

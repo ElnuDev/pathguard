@@ -5,6 +5,7 @@ mod auth;
 mod dashboard;
 mod models;
 mod proxy;
+mod files;
 mod templates;
 
 mod database;
@@ -12,14 +13,10 @@ mod schema;
 
 use std::{env, path::PathBuf};
 
-use actix_htmx::HtmxMiddleware;
+use actix_htmx::{Htmx, HtmxMiddleware};
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
 use actix_web::{
-    cookie::Key,
-    http::header::{HeaderValue, CONTENT_TYPE},
-    middleware::{self},
-    mime::TEXT_HTML_UTF_8,
-    web, App, HttpResponse, HttpServer,
+    App, HttpRequest, HttpResponse, HttpServer, cookie::Key, http::header::{CONTENT_TYPE, HeaderValue}, middleware::{self}, mime::TEXT_HTML_UTF_8, web
 };
 use maud::html;
 
@@ -27,13 +24,11 @@ use clap::{Parser, Subcommand};
 use passwords::PasswordGenerator;
 
 use crate::{
-    dashboard::{
+    auth::{Authorized, Fancy, Unauthorized}, dashboard::{
         dashboard, delete_group, delete_rule, delete_user, get_groups, get_user, get_user_edit,
         get_user_groups, logout, patch_rule, patch_user, post_group, post_login, post_rule,
         post_user,
-    },
-    database::Database,
-    templates::page,
+    }, database::Database, templates::page
 };
 
 #[derive(Subcommand, Debug, Clone)]
@@ -73,7 +68,15 @@ pub const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
 };
 
 lazy_static::lazy_static! {
-    pub static ref ARGS: Args = Args::parse();
+    static ref ARGS: Args = {
+        let mut args = Args::parse();
+        if let Mode::Files(FilesMode { root }) = &mut args.mode {
+            // Ugly paths like . or .. can cause issues when checking for
+            // FilesError::OutOfScope
+            *root = root.canonicalize().unwrap();
+        }
+        args
+    };
     pub static ref DATABASE: Database = Database::new(&ARGS.database).unwrap();
 }
 
@@ -94,9 +97,8 @@ async fn main() -> std::io::Result<()> {
     // If we construct this inside of HttpServer::new
     // then it will instantiate multiple times leading to state divergence
     HttpServer::new(move || {
-        App::new()
+        let app = App::new()
             .wrap(middleware::Logger::default())
-            .wrap(middleware::NormalizePath::trim())
             .wrap(middleware::DefaultHeaders::new().add((CONTENT_TYPE, TEXT_HTML_UTF_8)))
             .wrap(SessionMiddleware::builder(
                 CookieSessionStore::default(),
@@ -152,8 +154,15 @@ async fn main() -> std::io::Result<()> {
                 let mut res = HttpResponse::Ok().body(include_str!("override.css"));
                 res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("text/css").unwrap());
                 res
-            }))
-            .default_service(web::to(proxy::proxy))
+            }));
+        match &ARGS.mode {
+            Mode::Proxy(ProxyMode { port }) => app.default_service(
+                web::to(async |auth: Fancy<Authorized>, req: HttpRequest, bytes: web::Bytes| proxy::proxy(auth, req, bytes, *port).await)
+            ),
+            Mode::Files(FilesMode { root }) => app.default_service(
+                web::to(async |auth: Fancy<Unauthorized>, req: HttpRequest, htmx: Htmx| files::files(auth, req, htmx, root).await)
+            ),
+        }
     })
         .disable_signals()
         .bind(("127.0.0.1", ARGS.port))?

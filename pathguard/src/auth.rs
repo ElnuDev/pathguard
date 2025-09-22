@@ -7,12 +7,13 @@ use actix_web::{
 use awc::http::header::{TryIntoHeaderValue, CONTENT_TYPE};
 use chrono::Utc;
 use derive_more::{Display, From};
-use diesel::{dsl::insert_into, prelude::*};
+use diesel::{dsl::insert_into, prelude::*, r2d2::ConnectionManager};
 use maud::{html, Markup, Render};
+use r2d2::PooledConnection;
 use std::{
     convert::Infallible,
     fmt::Debug,
-    future::{self, ready, Ready},
+    future::{self, Ready, ready},
     ops::{Deref, DerefMut},
 };
 use thiserror::Error;
@@ -203,6 +204,43 @@ impl ResponseError for AuthorizationError {
     }
 }
 
+pub fn user_rules(
+    conn: &mut PooledConnection<ConnectionManager<SqliteConnection>>,
+    user: Option<&User>
+) -> Result<Vec<Rule>, diesel::result::Error> {
+    if let Some(user) = user {
+        use crate::schema::{
+            groups::dsl::{name as group_name, sort as group_sort, *},
+            rules::dsl::{group as rule_group, sort as rule_sort, *},
+            user_groups::dsl::group as user_group_group,
+        };
+        UserGroup::belonging_to(user)
+            .inner_join(groups.on(group_name.eq(user_group_group)))
+            .inner_join(rules.on(rule_group.eq(group_name)))
+            .select(Rule::as_select())
+            .order(group_sort)
+            .then_order_by(rule_sort)
+            .load(conn)
+    } else {
+        use crate::schema::rules::dsl;
+        dsl::rules
+            .filter(dsl::group.eq(DEFAULT_GROUP))
+            .select(Rule::as_select())
+            .load(conn)
+    }
+}
+
+pub fn user_rules_allowed(rules: &Vec<Rule>, path: &str) -> bool {
+    rules
+        .iter()
+        .filter_map(|rule| {
+            rule.allowed
+                .and_then(|allowed| path.starts_with(&rule.path).then_some(allowed))
+        })
+        .next_back()
+        .unwrap_or_default()
+}
+
 fn allowed_and_log(req: &HttpRequest, user: Option<&User>) -> database::Result<bool> {
     if user.map(|user| user.is_admin()).unwrap_or_default() {
         return Ok(true);
@@ -214,35 +252,7 @@ fn allowed_and_log(req: &HttpRequest, user: Option<&User>) -> database::Result<b
     // Get request timestamp before database ops
     let timestamp = Utc::now().naive_utc();
     DATABASE.run(|conn| {
-        let allowed = {
-            if let Some(user) = user {
-                use crate::schema::{
-                    groups::dsl::{name as group_name, sort as group_sort, *},
-                    rules::dsl::{group as rule_group, sort as rule_sort, *},
-                    user_groups::dsl::group as user_group_group,
-                };
-                UserGroup::belonging_to(user)
-                    .inner_join(groups.on(group_name.eq(user_group_group)))
-                    .inner_join(rules.on(rule_group.eq(group_name)))
-                    .select(Rule::as_select())
-                    .order(group_sort)
-                    .then_order_by(rule_sort)
-                    .load(conn)
-            } else {
-                use crate::schema::rules::dsl;
-                dsl::rules
-                    .filter(dsl::group.eq(DEFAULT_GROUP))
-                    .select(Rule::as_select())
-                    .load(conn)
-            }?
-            .iter()
-            .filter_map(|rule| {
-                rule.allowed
-                    .and_then(|allowed| path.starts_with(&rule.path).then_some(allowed))
-            })
-            .next_back()
-            .unwrap_or_default()
-        };
+        let allowed = user_rules_allowed(&user_rules(conn, user)?, path);
         {
             use crate::schema::activities::dsl::activities;
             insert_into(activities)
@@ -259,7 +269,7 @@ fn allowed_and_log(req: &HttpRequest, user: Option<&User>) -> database::Result<b
     })
 }
 
-/// Route requires users to be logged in, but protection rules are ignored.
+/// Route requires users to be logged in, but protection rules are ignored and no activity is logged.
 /// In almost all cases `Authorized` or `AuthorizedAdmin` should be used instead.
 pub struct AuthorizedNoCheck(pub User);
 
@@ -296,6 +306,29 @@ impl FromRequest for AuthorizedNoCheck {
             };
             Ok(Self(user))
         })())
+    }
+}
+
+/// Route requires valid user information but isn't protected and no activity is logged.
+pub struct Unauthorized {
+    pub user: Option<User>,
+    pub fallback_err: UnauthorizedError,
+}
+
+impl FromRequest for Unauthorized {
+    type Error = database::DatabaseError;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, payload: &mut actix_web::dev::Payload) -> Self::Future {
+        use AuthorizationError::*;
+        ready((|| Ok(match AuthorizedNoCheck::from_request(req, payload).into_inner() {
+            Ok(AuthorizedNoCheck(user)) => Self {
+                fallback_err: UnauthorizedError::LoggedIn { username: user.name.clone() },
+                user: Some(user),
+            },
+            Err(Unauthorized(err)) => Self { user: None, fallback_err: err },
+            Err(Database(err)) => return Err(err),
+        }))())
     }
 }
 

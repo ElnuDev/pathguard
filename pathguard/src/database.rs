@@ -2,6 +2,8 @@ use actix_web::{http::StatusCode, ResponseError};
 use diesel::insert_or_ignore_into;
 use diesel::prelude::*;
 use diesel::r2d2::ConnectionManager;
+use maud::Render;
+use maud::html;
 use r2d2::{Pool, PooledConnection};
 use thiserror::Error;
 
@@ -19,6 +21,12 @@ pub enum DatabaseError {
     Diesel(#[from] diesel::result::Error),
     #[error("{0}")]
     Pool(#[from] r2d2::Error),
+}
+
+impl Render for DatabaseError {
+    fn render(&self) -> maud::Markup {
+        html! { (self) }
+    }
 }
 
 impl ResponseError for DatabaseError {
