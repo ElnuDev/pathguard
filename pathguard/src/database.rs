@@ -1,3 +1,6 @@
+use std::fs;
+use std::path::PathBuf;
+
 use actix_web::{http::StatusCode, ResponseError};
 use diesel::insert_or_ignore_into;
 use diesel::prelude::*;
@@ -54,6 +57,7 @@ pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
 impl Database {
     pub fn new(path: &str) -> Result<Self> {
+        fs::create_dir_all(PathBuf::from(path).parent().unwrap()).unwrap();
         let manager = ConnectionManager::<SqliteConnection>::new(path);
         let connection_pool = Pool::builder()
             .test_on_check_out(true)
