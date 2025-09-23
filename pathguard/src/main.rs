@@ -57,8 +57,6 @@ pub struct FilesMode {
 #[derive(Parser, Debug, Clone)]
 #[command(author, version)]
 pub struct Args {
-    #[command(subcommand)]
-    pub mode: Mode,
     #[arg(long = "db", default_value = "database.db")]
     pub database: Box<str>,
     #[arg(short, long, default_value_t = 8000)]
@@ -67,6 +65,8 @@ pub struct Args {
     pub dashboard: Box<str>,
     #[arg(short, long, default_value_t = 60.0)]
     pub min_password_strength: f64,
+    #[command(subcommand)]
+    pub mode: Mode,
 }
 
 pub const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
