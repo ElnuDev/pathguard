@@ -395,16 +395,18 @@ pub async fn patch_user(
     // if the given user doesn't exist. SQLite doesn't support reporting back
     // which foreign key violation there was (nonexistent user vs group),
     // so we have to make sure manually.
-    if let Some(res) = DATABASE.run(|conn| {
-        let user_exists: bool = {
+    let user = match DATABASE.run(|conn| {
+        let Some(created): Option<NaiveDateTime> = ({
             use crate::schema::users::dsl;
-            select(exists(dsl::users.filter(dsl::name.eq(&name)))).get_result(conn)?
+            dsl::users
+                .filter(dsl::name.eq(&name))
+                .select(dsl::created)
+                .get_result(conn)
+                .optional()?
+        }) else {
+            return Ok(Err(ErrorNotFound("that user doesn't exist").error_response()));
         };
-        if !user_exists {
-            return Ok(Some(
-                ErrorNotFound("that user doesn't exist").error_response(),
-            ));
-        }
+
         conn.transaction(|conn| -> Result<(), diesel::result::Error> {
             {
                 use crate::schema::user_groups::dsl;
@@ -420,11 +422,11 @@ pub async fn patch_user(
             }
             Ok(())
         })?;
-        Ok(None)
+        Ok(Ok(created))
     })? {
-        return Ok(res);
-    }
-    let user = User::new(name, password).with_groups(groups);
+        Ok(created) => User { name, password, created }.with_groups(groups),
+        Err(res) => return Ok(res),
+    };
 
     let mut res = HttpResponse::Ok();
     let mut res = if htmx.is_htmx {
