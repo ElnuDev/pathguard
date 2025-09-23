@@ -406,9 +406,18 @@ pub async fn patch_user(
             ));
         }
         conn.transaction(|conn| -> Result<(), diesel::result::Error> {
-            use crate::schema::user_groups::dsl;
-            delete(dsl::user_groups.filter(dsl::user.eq(&name))).execute(conn)?;
-            add_groups(conn, &name, groups.iter())?;
+            {
+                use crate::schema::user_groups::dsl;
+                delete(dsl::user_groups.filter(dsl::user.eq(&name))).execute(conn)?;
+                add_groups(conn, &name, groups.iter())?;
+            }
+            {
+                use crate::schema::users::dsl;
+                update(dsl::users)
+                    .filter(dsl::name.eq(&name))
+                    .set(dsl::password.eq(&password))
+                    .execute(conn)?;
+            }
             Ok(())
         })?;
         Ok(None)
@@ -418,14 +427,22 @@ pub async fn patch_user(
     let user = User::new(name, password).with_groups(groups);
 
     let mut res = HttpResponse::Ok();
-    Ok(if htmx.is_htmx {
+    let mut res = if htmx.is_htmx {
         res.body(user.display_partial(UserRenderContext {
             mode: UserDisplayMode::Normal,
             last_active: user.last_active()?,
         }))
     } else {
         res.finish()
-    })
+    };
+    if user.name == ADMIN_USERNAME {
+        res.add_cookie(&{
+            let mut c = PASSWORD_COOKIE.clone();
+            c.set_value(&user.password);
+            c
+        }).unwrap();
+    }
+    Ok(res)
 }
 
 pub async fn delete_user(
