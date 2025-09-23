@@ -1,7 +1,5 @@
 use std::{
-    fs::{self, DirEntry},
-    io,
-    path::{Path, PathBuf},
+    borrow::Cow, fs::{self, DirEntry}, io, path::{Path, PathBuf}
 };
 
 use actix_files::NamedFile;
@@ -138,7 +136,10 @@ pub async fn files(
         })
     };
 
-    let path = root.join(req.path().trim_start_matches("/"));
+    let path = req.path();
+    let decoded_path = urlencoding::decode(path)
+        .unwrap_or(Cow::Borrowed(path));
+    let path = root.join(decoded_path.trim_start_matches("/"));
     if !path.canonicalize()?.starts_with(root) {
         log_activity(false)?;
         return Err(FancyError(FilesError::OutOfScope));
@@ -269,7 +270,7 @@ pub async fn files(
                                 { (const_icon!(HOME)) " Home" }
                             }
                             @let mut link = String::new();
-                            @let comps: Vec<&str> = req.path().split("/").skip(1).collect();
+                            @let comps: Vec<&str> = decoded_path.split("/").skip(1).collect();
                             @for comp in comps.iter().rev().skip(2).rev() {
                                 li {
                                     @let _ = { path.push(comp); };
