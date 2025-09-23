@@ -1,12 +1,4 @@
 /*
-TODO
-4. (optional) uncomment `nativeBuildInputs` and `buildInputs`
-5. (optional) set your project homepage
-6. (optional) uncomment the NixOS module and update it for your needs
-7. Delete this comment block
-*/
-
-/*
 Some utility commands:
 - `nix flake update --commit-lock-file`
 - `nix flake lock update-input <input>`
@@ -33,20 +25,25 @@ Some utility commands:
         src = ./.;
         #nativeBuildInputs = [ pkg-config ];
         #buildInputs = [ openssl ];
-        cargoHash = nixpkgs.lib.fakeHash;
+        cargoHash = "sha256-PKaNhg7g3lExVi7Q4rPRbSOJ9MVzhx9DSqj9weTT9KM=";
       };
       meta = with nixpkgs.lib; {
-        #homepage = "https://example.com";
+        homepage = "https://github.com/ElnuDev/pathguard";
         license = [ licenses.gpl3 ];
         platforms = [ system ];
         maintainers = with maintainers; [ elnudev ];
       };
+      nightly = pkgs.rust-bin.nightly.latest.default.override {
+        extensions = [ "rust-src" ];
+      };
+      platform = pkgs.makeRustPlatform {
+        cargo = nightly;
+        rustc = nightly;
+      };
     in {
       devShells.${system}.default = with pkgs; mkShell {
         packages = [
-          (pkgs.rust-bin.nightly.latest.default.override {
-            extensions = [ "rust-src" ];
-          })
+          nightly
           cargo-edit
           cargo-shear
           bacon
@@ -56,17 +53,15 @@ Some utility commands:
       };
       packages.${system} = {
         default = self.packages.${system}.pathguard;
-        pathguard = pkgs.rustPlatform.buildRustPackage (rustSettings // {
+        pathguard = platform.buildRustPackage (rustSettings // {
           pname = "pathguard";
           version = "0.1.0";
           buildAndTestSubdir = "pathguard";
-          cargoHash = "sha256-+TaGIiKf+Pz2bTABeG8aCZz0/ZTCKl5398+qbas4Nvo=";
           meta = meta // {
             description = "A customizable password protection system for HTTP services and file servers.";
           };
         });
       };
-      /*
       nixosModules.default = { config, ... }: let
         lib = nixpkgs.lib;
       in {
@@ -80,12 +75,32 @@ Some utility commands:
               The pathguard package that should be used.
             '';
           };
+          mode = lib.mkOption {
+            type = lib.types.submodule {
+              options = {
+                kind = lib.mkOption {
+                  type = lib.types.enum [ "proxy" "files" ];
+                };
+                port = lib.mkOption {
+                  type = lib.types.port;
+                };
+                root = lib.mkOption {
+                  type = lib.types.path;
+                };
+              };
+            };
+          };
           port = lib.mkOption {
             type = lib.types.port;
             default = 8000;
-            description = lib.mdDoc ''
-              The port at which to run.
-            '';
+          };
+          dashboard = lib.mkOption {
+            type = lib.types.str;
+            default = "/pathguard";
+          };
+          minPasswordStrength = lib.mkOption {
+            type = lib.types.int;
+            default = 60;
           };
         };
         config.systemd.services.pathguard = let
@@ -96,14 +111,24 @@ Some utility commands:
           after = [ "network.target" ];
           wantedBy = [ "network.target" ];
           serviceConfig = {
-            ExecStart = ''
-              ${cfg.package}/bin/pathguard --port ${builtins.toString cfg.port}
-            '';
+            StateDirectory = "pathguard";
+            ExecStart = let
+              params =
+                "--db /var/lib/pathguard/database.db " +
+                "--port ${builtins.toString cfg.port} " +
+                "--dashboard ${cfg.dashboard} " +
+                "--min-password-strength ${builtins.toString cfg.minPasswordStrength}";
+              mode =
+                if cfg.mode.kind == "proxy" then
+                  "proxy ${builtins.toString cfg.mode.port}"
+                else
+                  "files ${cfg.mode.root}";
+            in
+              "${cfg.package}/bin/pathguard ${params} ${mode}";
             Restart = "always";
             DynamicUser = true;
           };
         };
       };
-      */
     };
 }
