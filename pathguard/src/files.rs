@@ -115,28 +115,34 @@ pub async fn files(
 ) -> Result<HttpResponse, FancyError<FilesError>> {
     // Get request timestamp before database ops
     let timestamp = Utc::now().naive_utc();
-    let log_activity = |allowed| DATABASE.run(|conn| {
-        use crate::schema::activities::dsl::activities;
-        insert_into(activities)
-            .values(Activity {
-                user: user.as_ref().map(|user| user.name.clone()),
-                timestamp,
-                path: req.path().to_string(),
-                allowed,
-                ..Activity::from_request(&req)
-            })
-            .execute(conn)
-    });
+    let is_admin = user
+        .as_ref()
+        .map(|user| user.is_admin())
+        .unwrap_or_default();
+    let log_activity = |allowed| {
+        if is_admin {
+            return Ok(());
+        }
+        DATABASE.run(|conn| {
+            use crate::schema::activities::dsl::activities;
+            insert_into(activities)
+                .values(Activity {
+                    user: user.as_ref().map(|user| user.name.clone()),
+                    timestamp,
+                    path: req.path().to_string(),
+                    allowed,
+                    ..Activity::from_request(&req)
+                })
+                .execute(conn)?;
+            Ok(())
+        })
+    };
 
     let path = root.join(req.path().trim_start_matches("/"));
     if !path.canonicalize()?.starts_with(root) {
         log_activity(false)?;
         return Err(FancyError(FilesError::OutOfScope));
     }
-    let is_admin = user
-        .as_ref()
-        .map(|user| user.is_admin())
-        .unwrap_or_default();
     Ok(match path.is_dir() {
         false => {
             if !is_admin
