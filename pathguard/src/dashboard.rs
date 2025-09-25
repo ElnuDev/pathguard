@@ -107,7 +107,6 @@ pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpRe
         .table.rows {
             @for group in groups.iter() {
                 (group.display()?)
-                hr;
             }
             form hx-post={ (ARGS.dashboard) (GROUPS_ROUTE) } hx-swap="beforebegin" hx-on::after-request="this.querySelector('input').value = ''" {
                 div { (const_icon_button!(PLUS, "", "ok")) }

@@ -73,3 +73,17 @@ document.addEventListener("DOMContentLoaded", _event => {
         modalOkButton.focus();
     });
 });
+
+/**
+ * @param {HTMLElement} element Element to swap
+ */
+function swapUp(element) {
+    element.parentElement.insertBefore(element, element.previousSibling);
+}
+
+/**
+ * @param {HTMLElement} element Element to swap
+ */
+function swapDown(element) {
+    element.parentElement.insertBefore(element.nextSibling, element);
+}

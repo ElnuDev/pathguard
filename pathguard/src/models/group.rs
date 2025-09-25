@@ -109,14 +109,14 @@ impl Group {
                         br;
                         (icon_button(
                             CHEVRON_UP,
-                            &format!("hx-post=\"{dashboard}/groups/{name}/up\"",
+                            &format!("hx-post=\"{dashboard}/groups/{name}/up\" hx-swap=\"none\" hx-on::after-swap=\"swapUp(this.parentElement.parentElement)\"",
                                 dashboard=ARGS.dashboard),
                             None
                         ))
                         br;
                         (icon_button(
                             CHEVRON_DOWN,
-                            &format!("hx-post=\"{dashboard}/groups/{name}/down\"",
+                            &format!("hx-post=\"{dashboard}/groups/{name}/down\" hx-swap=\"none\" hx-on::after-swap=\"swapDown(this.parentElement.parentElement)\"",
                                 dashboard=ARGS.dashboard),
                             None
                         ))
