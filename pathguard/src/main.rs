@@ -11,7 +11,7 @@ mod templates;
 mod database;
 mod schema;
 
-use std::{env, path::PathBuf};
+use std::{env, fs, path::PathBuf};
 
 use actix_htmx::{Htmx, HtmxMiddleware};
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
@@ -59,6 +59,8 @@ pub struct FilesMode {
 pub struct Args {
     #[arg(long = "db", default_value = "database.db")]
     pub database: Box<str>,
+    #[arg(short, long, default_value = "session.key")]
+    pub key: Box<str>,
     #[arg(short, long, default_value_t = 8000)]
     pub port: u16,
     #[arg(short, long, default_value = "/pathguard")]
@@ -103,14 +105,26 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
     // If we construct this inside of HttpServer::new
     // then it will instantiate multiple times leading to state divergence
+    let key = if fs::exists(&*ARGS.key)? {
+        Key::from(&fs::read(&*ARGS.key)?)
+    } else {
+        let new = Key::generate();
+        fs::write(&*ARGS.key, new.master())?;
+        new
+    };
     HttpServer::new(move || {
         let app = App::new()
             .wrap(middleware::Logger::default())
             .wrap(middleware::DefaultHeaders::new().add((CONTENT_TYPE, TEXT_HTML_UTF_8)))
-            .wrap(SessionMiddleware::builder(
-                CookieSessionStore::default(),
-                Key::from(&[0; 64]),
-            ).cookie_secure(false).build())
+            .wrap({
+                let mut builder = SessionMiddleware::builder(CookieSessionStore::default(), key.clone())
+                    .cookie_name("pathguard_id".to_owned());
+                #[cfg(debug_assertions)]
+                {
+                    builder = builder.cookie_secure(false);
+                }
+                builder.build()
+            })
             .wrap(HtmxMiddleware)
             .service(web::resource(&*ARGS.dashboard).get(dashboard))
             .service(web::resource(ARGS.dashboard.to_string() + LOGIN_ROUTE)

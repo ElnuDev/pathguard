@@ -1,7 +1,7 @@
 use std::{borrow::Cow, convert::Infallible, fmt::Debug, future::Ready, ops::Deref};
 
 use crate::{
-    auth::{log_out, AuthorizedAdmin, Fancy, PASSWORD_COOKIE, USERNAME_COOKIE},
+    auth::{AuthorizedAdmin, Fancy, PASSWORD_SESSION_KEY, USERNAME_SESSION_KEY},
     database::{self, DatabaseError},
     models::{
         group::{self, Rule, DEFAULT_GROUP},
@@ -12,11 +12,9 @@ use crate::{
     ARGS, DATABASE, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE,
 };
 use actix_htmx::Htmx;
+use actix_session::Session;
 use actix_web::{
-    error::{ErrorBadRequest, ErrorForbidden, ErrorNotFound},
-    http::header::REFERER,
-    web::{self, Redirect},
-    FromRequest, HttpRequest, HttpResponse, Responder, ResponseError,
+    error::{ErrorBadRequest, ErrorForbidden, ErrorNotFound}, http::header::REFERER, web::{self, Redirect}, FromRequest, HttpRequest, HttpResponse, Responder, ResponseError
 };
 use awc::http::StatusCode;
 use chrono::NaiveDateTime;
@@ -379,6 +377,7 @@ pub async fn patch_user(
     htmx: Htmx,
     web::Form(form): web::Form<Vec<(String, String)>>,
     path: web::Path<String>,
+    session: Session,
 ) -> Result<HttpResponse, UserError> {
     let UserForm {
         password,
@@ -428,23 +427,18 @@ pub async fn patch_user(
         Err(res) => return Ok(res),
     };
 
+    if user.name == ADMIN_USERNAME {
+        session.insert(PASSWORD_SESSION_KEY, &user.password).unwrap();
+    }
     let mut res = HttpResponse::Ok();
-    let mut res = if htmx.is_htmx {
+    Ok(if htmx.is_htmx {
         res.body(user.display_partial(UserRenderContext {
             mode: UserDisplayMode::Normal,
             last_active: user.last_active()?,
         }))
     } else {
         res.finish()
-    };
-    if user.name == ADMIN_USERNAME {
-        res.add_cookie(&{
-            let mut c = PASSWORD_COOKIE.clone();
-            c.set_value(&user.password);
-            c
-        }).unwrap();
-    }
-    Ok(res)
+    })
 }
 
 pub async fn delete_user(
@@ -664,23 +658,22 @@ pub fn login_form(invalid: bool, return_uri: &str) -> Markup {
 
 const QUERY_REDIRECT: &str = "r";
 
-pub async fn logout(req: HttpRequest, htmx: Htmx) -> impl Responder {
+pub async fn logout(req: HttpRequest, htmx: Htmx, session: Session) -> HttpResponse {
     let redirect = req
         .headers()
         .get(REFERER)
         .and_then(|header| header.to_str().ok())
         .unwrap_or(&ARGS.dashboard)
         .to_owned();
-    let mut res = if htmx.is_htmx {
+    session.purge();
+    if htmx.is_htmx {
         htmx.redirect(redirect);
         HttpResponse::Ok().finish()
     } else {
         Redirect::to(redirect)
             .respond_to(&req)
             .map_into_boxed_body()
-    };
-    log_out(&mut res);
-    res
+    }
 }
 
 #[derive(Deserialize)]
@@ -694,6 +687,7 @@ pub async fn post_login(
     htmx: Htmx,
     web::Form(form): web::Form<Login>,
     return_uri: LoginReturnUri,
+    session: Session,
 ) -> database::Result<HttpResponse> {
     let authorized: bool = DATABASE.run(|conn| {
         use crate::schema::users::dsl;
@@ -705,7 +699,9 @@ pub async fn post_login(
         .get_result(conn)
     })?;
     if authorized {
-        let mut res = if htmx.is_htmx {
+        session.insert(USERNAME_SESSION_KEY, &form.name).unwrap();
+        session.insert(PASSWORD_SESSION_KEY, &form.password).unwrap();
+        return Ok(if htmx.is_htmx {
             htmx.redirect(return_uri.0);
             HttpResponse::Ok().finish()
         } else {
@@ -713,20 +709,7 @@ pub async fn post_login(
                 .see_other()
                 .respond_to(&req)
                 .map_into_boxed_body()
-        };
-        res.add_cookie(&{
-            let mut c = USERNAME_COOKIE.clone();
-            c.set_value(form.name);
-            c
-        })
-        .unwrap();
-        res.add_cookie(&{
-            let mut c = PASSWORD_COOKIE.clone();
-            c.set_value(form.password);
-            c
-        })
-        .unwrap();
-        return Ok(res);
+        });
     }
     // Invalid credentials
     Ok(if htmx.is_htmx {

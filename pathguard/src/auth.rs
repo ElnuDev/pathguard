@@ -1,6 +1,6 @@
+use actix_session::{Session, SessionGetError};
 use actix_web::{
     body::BoxBody,
-    cookie::Cookie,
     http::{header::ContentType, StatusCode},
     FromRequest, HttpRequest, HttpResponse, ResponseError,
 };
@@ -11,9 +11,8 @@ use diesel::{dsl::insert_into, prelude::*, r2d2::ConnectionManager};
 use maud::{html, Markup, Render};
 use r2d2::PooledConnection;
 use std::{
-    convert::Infallible,
     fmt::Debug,
-    future::{self, ready, Ready},
+    future::{ready, Ready},
     ops::{Deref, DerefMut},
 };
 use thiserror::Error;
@@ -29,21 +28,6 @@ use crate::{
     templates::page,
     ARGS, DATABASE, LOGOUT_ROUTE,
 };
-
-pub struct MaybeSessionUserCookies(pub Option<SessionUserCookies>);
-
-impl Deref for MaybeSessionUserCookies {
-    type Target = Option<SessionUserCookies>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-pub struct SessionUserCookies {
-    pub username: Box<str>,
-    pub password: Box<str>,
-}
 
 #[derive(Error, Debug)]
 pub enum UnauthorizedError {
@@ -109,29 +93,12 @@ impl ResponseError for UnauthorizedError {
             }
         }
 
-        let mut res = Error::new(self).error_response();
-        log_out(&mut res);
-        res
+        Error::new(self).error_response()
     }
 }
 
-lazy_static::lazy_static! {
-    pub static ref USERNAME_COOKIE: Cookie<'static> = {
-        let mut c = Cookie::named("pathguard_username");
-        c.set_path("/");
-        c
-    };
-    pub static ref PASSWORD_COOKIE: Cookie<'static> = {
-        let mut c = Cookie::named("pathguard_password");
-        c.set_path("/");
-        c
-    };
-}
-
-pub fn log_out<T>(res: &mut HttpResponse<T>) {
-    res.add_removal_cookie(&USERNAME_COOKIE).unwrap();
-    res.add_removal_cookie(&PASSWORD_COOKIE).unwrap();
-}
+pub const USERNAME_SESSION_KEY: &str = "username";
+pub const PASSWORD_SESSION_KEY: &str = "password";
 
 impl Render for UnauthorizedError {
     fn render(&self) -> Markup {
@@ -154,25 +121,6 @@ impl Render for UnauthorizedError {
                 }
             },
         }
-    }
-}
-
-impl FromRequest for MaybeSessionUserCookies {
-    type Error = Infallible;
-    type Future = Ready<Result<Self, Self::Error>>;
-
-    fn from_request(
-        req: &actix_web::HttpRequest,
-        _payload: &mut actix_web::dev::Payload,
-    ) -> Self::Future {
-        future::ready(Ok(Self((|| {
-            let username_cookie = req.cookie(USERNAME_COOKIE.name())?;
-            let password_cookie = req.cookie(PASSWORD_COOKIE.name())?;
-            Some(SessionUserCookies {
-                username: username_cookie.value().to_string().into_boxed_str(),
-                password: password_cookie.value().to_string().into_boxed_str(),
-            })
-        })())))
     }
 }
 
@@ -280,31 +228,36 @@ impl FromRequest for AuthorizedNoCheck {
     fn from_request(req: &HttpRequest, payload: &mut actix_web::dev::Payload) -> Self::Future {
         ready((|| {
             use AuthorizationError::*;
-            let MaybeSessionUserCookies(Some(SessionUserCookies { username, password })) =
-                MaybeSessionUserCookies::from_request(req, payload)
-                    .into_inner()
-                    .unwrap()
-            else {
+            let session = {
+                // Session::from_request is infallible even though it returns actix_web::Error
+                // https://github.com/actix/actix-extras/pull/596
+                let result: Result<Session, actix_web::Error> = Session::from_request(req, payload).into_inner();
+                result.unwrap()
+            };
+            let Ok(Some((username, password))) = (|| -> Result<Option<(String, String)>, SessionGetError> {
+                let Some(username) = session.get(USERNAME_SESSION_KEY)? else {
+                    return Ok(None);
+                };
+                let Some(password) = session.get(PASSWORD_SESSION_KEY)? else {
+                    return Ok(None);
+                };
+                Ok(Some((username, password)))
+            })() else {
+                session.purge();
                 return Err(Unauthorized(UnauthorizedError::not_logged_in(req)));
             };
-            let user = match DATABASE.run(|conn| {
-                use crate::schema::users::dsl::*;
-                users
+            match DATABASE.run(|conn| {
+                use crate::schema::users::dsl;
+                dsl::users
                     .select(User::as_select())
-                    .filter(name.eq(&*username))
-                    .get_result::<User>(conn)
+                    .filter(dsl::name.eq(&username))
+                    .filter(dsl::password.eq(&password))
+                    .get_result(conn)
                     .optional()
             })? {
-                Some(user) => {
-                    if *user.password == *password {
-                        user
-                    } else {
-                        return Err(Unauthorized(UnauthorizedError::bad_login(req)));
-                    }
-                }
-                None => return Err(Unauthorized(UnauthorizedError::not_logged_in(req))),
-            };
-            Ok(Self(user))
+                Some(user) => Ok(Self(user)),
+                None => Err(Unauthorized(UnauthorizedError::bad_login(req))),
+            }
         })())
     }
 }

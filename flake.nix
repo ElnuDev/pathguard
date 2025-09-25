@@ -115,6 +115,7 @@ Some utility commands:
             ExecStart = let
               params =
                 "--db /var/lib/pathguard/database.db " +
+                "--key /var/lib/pathguard/session.key " +
                 "--port ${builtins.toString cfg.port} " +
                 "--dashboard ${cfg.dashboard} " +
                 "--min-password-strength ${builtins.toString cfg.minPasswordStrength}";
