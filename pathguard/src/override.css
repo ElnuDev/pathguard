@@ -124,6 +124,9 @@ details.inline > :not(summary) {
 
 :is(.rows > *, .row) > * {
     margin: 0 !important;
+}
+
+form * {
     vertical-align: middle !important;
 }
 
