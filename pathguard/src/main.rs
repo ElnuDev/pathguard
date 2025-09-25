@@ -29,11 +29,7 @@ use passwords::PasswordGenerator;
 
 use crate::{
     auth::{Authorized, Fancy, Unauthorized},
-    dashboard::{
-        dashboard, delete_group, delete_rule, delete_user, get_groups, get_user, get_user_edit,
-        get_user_groups, logout, patch_rule, patch_user, post_group, post_login, post_rule,
-        post_user,
-    },
+    dashboard::*,
     database::Database,
     templates::page,
 };
@@ -137,7 +133,11 @@ async fn main() -> std::io::Result<()> {
             .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}")
                 .post(post_rule)
                 .delete(delete_group))
-            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/{rule}")
+            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/up")
+                .post(post_group_up))
+            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/down")
+                .post(post_group_down))
+            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/rules/{rule}")
                 .patch(patch_rule)
                 .delete(delete_rule))
             .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE)

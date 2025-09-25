@@ -14,7 +14,7 @@ use crate::{
 use actix_htmx::Htmx;
 use actix_session::Session;
 use actix_web::{
-    error::{ErrorBadRequest, ErrorForbidden, ErrorNotFound}, http::header::REFERER, web::{self, Redirect}, FromRequest, HttpRequest, HttpResponse, Responder, ResponseError
+    error::{ErrorBadRequest, ErrorConflict, ErrorForbidden, ErrorNotFound}, http::header::REFERER, web::{self, Redirect}, FromRequest, HttpRequest, HttpResponse, Responder, ResponseError
 };
 use awc::http::StatusCode;
 use chrono::NaiveDateTime;
@@ -46,6 +46,12 @@ pub const CHECK: &str = CHECK_;
 
 const X_MARK_: &str = "x-mark";
 pub const X_MARK: &str = X_MARK_;
+
+const CHEVRON_UP_: &str = "chevron-up";
+pub const CHEVRON_UP: &str = CHEVRON_UP_;
+
+const CHEVRON_DOWN_: &str = "chevron-down";
+pub const CHEVRON_DOWN: &str = CHEVRON_DOWN_;
 
 pub fn timestamp(utc: &NaiveDateTime) -> Markup {
     html! {
@@ -88,6 +94,12 @@ pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpRe
             symbol #(X_MARK_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
                 (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />"#))
             }
+            symbol #(CHEVRON_UP_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m4.5 15.75 7.5-7.5 7.5 7.5" />"#))
+            }
+            symbol #(CHEVRON_DOWN_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />"#))
+            }
         }
         h1 { "Dashboard" }
         h2 #groups { "Groups" }
@@ -95,6 +107,7 @@ pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpRe
         .table.rows {
             @for group in groups.iter() {
                 (group.display()?)
+                hr;
             }
             form hx-post={ (ARGS.dashboard) (GROUPS_ROUTE) } hx-swap="beforebegin" hx-on::after-request="this.querySelector('input').value = ''" {
                 div { (const_icon_button!(PLUS, "", "ok")) }
@@ -629,6 +642,97 @@ pub async fn delete_group(
         refetch_groups_deleted(&htmx);
     }
     Ok(HttpResponse::Ok().finish())
+}
+
+pub async fn post_group_up(
+    _auth: AuthorizedAdmin,
+    path: web::Path<String>,
+) -> database::Result<HttpResponse> {
+    let name = path.into_inner();
+    if name == DEFAULT_GROUP {
+        return Ok(ErrorForbidden("can't move default group").error_response());
+    }
+    DATABASE.run(|conn| {
+        use crate::schema::groups::dsl;
+        let Some(current_sort): Option<i32> = dsl::groups
+            .select(dsl::sort)
+            .filter(dsl::name.eq(&name))
+            .get_result(conn)
+            .optional()?
+        else
+        {
+            return Ok(HttpResponse::NotFound().finish());
+        };
+        let Some((previous_name, previous_sort)): Option<(String, i32)> = dsl::groups
+            .select((dsl::name, dsl::sort))
+            .filter(dsl::sort.lt(current_sort))
+            .filter(dsl::name.ne(DEFAULT_GROUP))
+            .order(dsl::sort.desc())
+            .get_result(conn)
+            .optional()?
+        else
+        {
+            return Ok(ErrorConflict("can't move group above default group").error_response());
+        };
+        // Swap sort values with previous
+        conn.transaction(|conn| {
+            update(dsl::groups)
+                .set(dsl::sort.eq(current_sort))
+                .filter(dsl::name.eq(&previous_name))
+                .execute(conn)?;
+            update(dsl::groups)
+                .set(dsl::sort.eq(previous_sort))
+                .filter(dsl::name.eq(&name))
+                .execute(conn)?;
+            Result::<(), diesel::result::Error>::Ok(())
+        })?;
+        Ok(HttpResponse::Ok().finish())
+    })
+}
+
+pub async fn post_group_down(
+    _auth: AuthorizedAdmin,
+    path: web::Path<String>,
+) -> database::Result<HttpResponse> {
+    let name = path.into_inner();
+    if name == DEFAULT_GROUP {
+        return Ok(ErrorForbidden("can't move default group").error_response());
+    }
+    DATABASE.run(|conn| {
+        use crate::schema::groups::dsl;
+        let Some(current_sort): Option<i32> = dsl::groups
+            .select(dsl::sort)
+            .filter(dsl::name.eq(&name))
+            .get_result(conn)
+            .optional()?
+        else
+        {
+            return Ok(HttpResponse::NotFound().finish());
+        };
+        let Some((next_name, next_sort)): Option<(String, i32)> = dsl::groups
+            .select((dsl::name, dsl::sort))
+            .filter(dsl::sort.gt(current_sort))
+            .order(dsl::sort)
+            .get_result(conn)
+            .optional()?
+        else
+        {
+            return Ok(ErrorConflict("can't move final group down").error_response());
+        };
+        // Swap sort values with next
+        conn.transaction(|conn| {
+            update(dsl::groups)
+                .set(dsl::sort.eq(current_sort))
+                .filter(dsl::name.eq(&next_name))
+                .execute(conn)?;
+            update(dsl::groups)
+                .set(dsl::sort.eq(next_sort))
+                .filter(dsl::name.eq(&name))
+                .execute(conn)?;
+            Result::<(), diesel::result::Error>::Ok(())
+        })?;
+        Ok(HttpResponse::Ok().finish())
+    })
 }
 
 pub fn login_form(invalid: bool, return_uri: &str) -> Markup {

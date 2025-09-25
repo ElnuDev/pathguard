@@ -1,7 +1,7 @@
 use maud::{html, Markup, Render};
 
 use crate::{
-    dashboard::{PLUS, TRASH},
+    dashboard::{CHEVRON_DOWN, CHEVRON_UP, PLUS, TRASH},
     database,
     templates::{const_icon_button, icon_button},
     ARGS, DATABASE, GROUPS_ROUTE,
@@ -40,7 +40,7 @@ impl Render for Rule {
                 div {
                     (icon_button(
                         TRASH,
-                        &format!("hx-delete=\"{dashboard}/groups/{group}/{path_encoded}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\" hx-confirm=\"Are you sure you want to delete this rule?\"",
+                        &format!("hx-delete=\"{dashboard}/groups/{group}/rules/{path_encoded}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\" hx-confirm=\"Are you sure you want to delete this rule?\"",
                             dashboard=ARGS.dashboard,
                             group=self.group),
                         Some("bad")
@@ -50,7 +50,7 @@ impl Render for Rule {
                 form.rule.float:right
                     autocomplete="off"
                     hx-trigger="change"
-                    hx-patch={ (ARGS.dashboard) (GROUPS_ROUTE) "/" (self.group) "/" (path_encoded) }
+                    hx-patch={ (ARGS.dashboard) (GROUPS_ROUTE) "/" (self.group) "/rules/" (path_encoded) }
                     hx-swap="beforebegin"
                 {
                     label { input name="rule" value=(RULE_OFF) type="radio" checked[self.allowed == Some(false)]; }
@@ -106,9 +106,25 @@ impl Group {
                             &format!("hx-delete=\"{}/groups/{name}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\" hx-confirm=\"Are you sure you want to delete this group?\"", ARGS.dashboard),
                             Some("bad")
                         ))
+                        br;
+                        (icon_button(
+                            CHEVRON_UP,
+                            &format!("hx-post=\"{dashboard}/groups/{name}/up\"",
+                                dashboard=ARGS.dashboard),
+                            None
+                        ))
+                        br;
+                        (icon_button(
+                            CHEVRON_DOWN,
+                            &format!("hx-post=\"{dashboard}/groups/{name}/down\"",
+                                dashboard=ARGS.dashboard),
+                            None
+                        ))
                     }
                 }
-                h3 #(self.id()) { (name) }
+                h3 #(self.id()) {
+                    (name)
+                }
                 .table.rows {
                     @for rule in rules {
                         (rule)
