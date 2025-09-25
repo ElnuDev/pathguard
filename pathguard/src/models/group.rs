@@ -144,6 +144,7 @@ impl Group {
                                 name="name"
                                 pattern="\\/.*"
                                 title="Must start with a /"
+                                placeholder="Add a new rule"
                                 required;
                         }
                     }

@@ -110,7 +110,7 @@ pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpRe
             }
             form hx-post={ (ARGS.dashboard) (GROUPS_ROUTE) } hx-swap="beforebegin" hx-on::after-request="this.querySelector('input').value = ''" {
                 div { (const_icon_button!(PLUS, "", "ok")) }
-                input type="text" name="name" required;
+                input type="text" name="name" placeholder="Add a new group" required;
             }
         }
         h2 #users { "Users" }
