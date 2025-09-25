@@ -53,9 +53,9 @@ impl Render for Rule {
                     hx-patch={ (ARGS.dashboard) (GROUPS_ROUTE) "/" (self.group) "/rules/" (path_encoded) }
                     hx-swap="beforebegin"
                 {
-                    label { input name="rule" value=(RULE_OFF) type="radio" checked[self.allowed == Some(false)]; }
-                    label { input name="rule" value=(RULE_NA) type="radio" checked[self.allowed.is_none()]; }
-                    label { input name="rule" value=(RULE_ON) type="radio" checked[self.allowed == Some(true)]; }
+                    label title="Block" { input name="rule" value=(RULE_OFF) type="radio" checked[self.allowed == Some(false)]; }
+                    label title="Unset" { input name="rule" value=(RULE_NA) type="radio" checked[self.allowed.is_none()]; }
+                    label title="Allow" { input name="rule" value=(RULE_ON) type="radio" checked[self.allowed == Some(true)]; }
                 }
             }
         }
