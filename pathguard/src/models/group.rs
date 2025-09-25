@@ -99,7 +99,7 @@ impl Group {
         let name = &self.name;
         html! {
             div {
-                div {
+                div style=[(name != DEFAULT_GROUP).then_some("border-left: 2px solid var(--graphical-fg); padding-left: 1em")] {
                     @if name != DEFAULT_GROUP {
                         (icon_button(
                             TRASH,
@@ -122,25 +122,30 @@ impl Group {
                         ))
                     }
                 }
-                h3 #(self.id()) {
-                    (name)
-                }
-                .table.rows {
-                    @for rule in rules {
-                        (rule)
+                div {
+                    h3.margin-block-start:0 #(self.id()) {
+                        (name)
                     }
-                    form
-                        hx-post={ (ARGS.dashboard) (GROUPS_ROUTE) "/" (name) }
-                        hx-swap="beforebegin"
-                        hx-on::after-request="this.querySelector('input').value = ''"
-                    {
-                        div { (const_icon_button!(PLUS, "", "ok")) }
-                        input
-                            type="text"
-                            name="name"
-                            pattern="\\/.*"
-                            title="Must start with a /"
-                            required;
+                    @if name == DEFAULT_GROUP {
+                        p { "Accessible routes for annonymous users that aren't signed in. By default, all routes are blocked." }
+                    }
+                    .table.rows {
+                        @for rule in rules {
+                            (rule)
+                        }
+                        form
+                            hx-post={ (ARGS.dashboard) (GROUPS_ROUTE) "/" (name) }
+                            hx-swap="beforebegin"
+                            hx-on::after-request="this.querySelector('input').value = ''"
+                        {
+                            div { (const_icon_button!(PLUS, "", "ok")) }
+                            input
+                                type="text"
+                                name="name"
+                                pattern="\\/.*"
+                                title="Must start with a /"
+                                required;
+                        }
                     }
                 }
             }
