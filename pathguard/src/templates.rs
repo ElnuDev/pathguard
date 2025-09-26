@@ -1,11 +1,11 @@
-use crate::{HTMX, MISSING_CSS, OVERRIDE_CSS, SCRIPT};
+use crate::{models::user::ADMIN_USERNAME, ARGS, HTMX, LOGOUT_ROUTE, MISSING_CSS, OVERRIDE_CSS, SCRIPT};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
-pub fn page(main: Markup) -> String {
+pub fn page(main: Markup) -> Markup {
     fancy_page(html! {}, main)
 }
 
-pub fn fancy_page(before_main: Markup, main: Markup) -> String {
+pub fn fancy_page(before_main: Markup, main: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html {
@@ -25,7 +25,30 @@ pub fn fancy_page(before_main: Markup, main: Markup) -> String {
                 }
             }
         }
-    }.0
+    }
+}
+
+pub fn dashboard_page(root: bool, main: Markup) -> Markup {
+    let root = root.then_some("").unwrap_or(&*ARGS.dashboard);
+    fancy_page(
+        html! {
+            header.navbar {
+                nav {
+                    ul role="list" {
+                        li { a.allcaps href=(root) { "pathguard" } }
+                        li { a href={ (root) "#groups" } { "Groups" } }
+                        li { a href={ (root) "#users" } { "Users" } }
+                        li { a href={ (ARGS.dashboard) "/activity" } { "Activity" } }
+                    }
+                }
+                nav style="margin-left: auto" {
+                    "Hello, " strong { (ADMIN_USERNAME) } " "
+                    a href={(ARGS.dashboard) (LOGOUT_ROUTE)} { "Log out" }
+                }
+            }
+        },
+        main
+    )
 }
 
 macro_rules! const_icon_raw {

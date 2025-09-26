@@ -1,15 +1,11 @@
 use std::{borrow::Cow, convert::Infallible, fmt::Debug, future::Ready, ops::Deref};
 
 use crate::{
-    auth::{AuthorizedAdmin, Fancy, PASSWORD_SESSION_KEY, USERNAME_SESSION_KEY},
-    database::{self, DatabaseError},
-    models::{
+    auth::{AuthorizedAdmin, Fancy, PASSWORD_SESSION_KEY, USERNAME_SESSION_KEY}, database::{self, DatabaseError}, models::{
         group::{self, Rule, DEFAULT_GROUP},
         user::{UserDisplayMode, UserRenderContext, UserWithGroups, ADMIN_USERNAME},
         Activity, Group, User,
-    },
-    templates::{const_icon_button, fancy_page},
-    ARGS, DATABASE, GROUPS_ROUTE, LOGIN_ROUTE, LOGOUT_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE,
+    }, templates::{const_icon_button, dashboard_page}, ARGS, DATABASE, GROUPS_ROUTE, LOGIN_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE
 };
 use actix_htmx::Htmx;
 use actix_session::Session;
@@ -60,24 +56,52 @@ pub fn timestamp(utc: &NaiveDateTime) -> Markup {
     }
 }
 
-pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpResponse> {
+pub async fn dashboard_activity(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpResponse> {
     const ACTIVITY_LIMIT: i64 = 100;
-    Ok(HttpResponse::Ok().body(fancy_page(html! {
-        header.navbar {
-            nav {
-                ul role="list" {
-                    li { a.allcaps href="#" { "pathguard" } }
-                    li { a href="#groups" { "Groups" } }
-                    li { a href="#users" { "Users" } }
-                    li { a href="#activity" { "Activity" } }
+    Ok(HttpResponse::Ok().body(dashboard_page(false, html! {
+        h2 #activity { "Activity" }
+        p { "Only showing latest " (ACTIVITY_LIMIT) " activity items." }
+        @let activities = DATABASE.run(|conn| {
+            use crate::schema::activities::dsl;
+            dsl::activities
+                .select(Activity::as_select())
+                .order(dsl::id.desc())
+                .limit(ACTIVITY_LIMIT)
+                .get_results(conn)
+        })?;
+        table style="width: 100%" {
+            thead {
+                tr {
+                    th scope="col" { "User" }
+                    th scope="col" { "IP" }
+                    th scope="col" { "Path" }
+                    th scope="col" { "Timestamp (UTC)" }
                 }
             }
-            nav style="margin-left: auto" {
-                "Hello, " strong { (ADMIN_USERNAME) } " "
-                a href={(ARGS.dashboard) (LOGOUT_ROUTE)} { "Log out" }
+            tbody {
+                @for activity in activities {
+                    tr.bg[!activity.allowed].color[!activity.allowed].bad[!activity.allowed] {
+                        td { @if let Some(user) = &activity.user { a href={ "#" (user) } { (user) } } }
+                        td { (activity.ip.deref()) }
+                        td {
+                            a
+                                target="_blank"
+                                href=(activity.path)
+                                hx-boost="false"
+                            {
+                                (activity.path)
+                            }
+                        }
+                        td { (timestamp(&activity.timestamp)) }
+                    }
+                }
             }
         }
-    },html! {
+    })))
+}
+
+pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpResponse> {
+    Ok(HttpResponse::Ok().body(dashboard_page(true, html! {
         svg xmlns="http://www.w3.org/2000/svg" style="display: none" {
             symbol #(TRASH_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
                 (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />"#))
@@ -124,44 +148,6 @@ pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpRe
                 }))
             }
             (new_user_form(false, &groups))
-        }
-        h2 #activity { "Activity" }
-        p { "Only showing latest " (ACTIVITY_LIMIT) " activity items." }
-        @let activities = DATABASE.run(|conn| {
-            use crate::schema::activities::dsl;
-            dsl::activities
-                .select(Activity::as_select())
-                .order(dsl::id.desc())
-                .limit(ACTIVITY_LIMIT)
-                .get_results(conn)
-        })?;
-        table style="width: 100%" {
-            thead {
-                tr {
-                    th scope="col" { "User" }
-                    th scope="col" { "IP" }
-                    th scope="col" { "Path" }
-                    th scope="col" { "Timestamp (UTC)" }
-                }
-            }
-            tbody {
-                @for activity in activities {
-                    tr.bg[!activity.allowed].color[!activity.allowed].bad[!activity.allowed] {
-                        td { @if let Some(user) = &activity.user { a href={ "#" (user) } { (user) } } }
-                        td { (activity.ip.deref()) }
-                        td {
-                            a
-                                target="_blank"
-                                href=(activity.path)
-                                hx-boost="false"
-                            {
-                                (activity.path)
-                            }
-                        }
-                        td { (timestamp(&activity.timestamp)) }
-                    }
-                }
-            }
         }
     })))
 }

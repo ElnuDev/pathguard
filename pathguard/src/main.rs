@@ -89,6 +89,7 @@ pub const LOGIN_ROUTE: &str = "/login";
 pub const LOGOUT_ROUTE: &str = "/logout";
 pub const GROUPS_ROUTE: &str = "/groups";
 pub const USERS_ROUTE: &str = "/users";
+pub const ACTIVITY_ROUTE: &str = "/activity";
 
 pub const HTMX: &str = "/pathguard_htmx.min.js";
 pub const SCRIPT: &str = "/pathguard_script.js";
@@ -123,6 +124,8 @@ async fn main() -> std::io::Result<()> {
             })
             .wrap(HtmxMiddleware)
             .service(web::resource(&*ARGS.dashboard).get(dashboard))
+            .service(web::resource(ARGS.dashboard.to_string() + ACTIVITY_ROUTE)
+                .get(dashboard_activity))
             .service(web::resource(ARGS.dashboard.to_string() + LOGIN_ROUTE)
                 .post(post_login))
             .service(web::resource(ARGS.dashboard.to_string() + LOGOUT_ROUTE)
