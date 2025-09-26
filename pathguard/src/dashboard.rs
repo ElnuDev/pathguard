@@ -56,19 +56,20 @@ pub fn timestamp(utc: &NaiveDateTime) -> Markup {
     }
 }
 
-pub async fn dashboard_activity(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpResponse> {
-    const ACTIVITY_LIMIT: i64 = 100;
-    Ok(HttpResponse::Ok().body(dashboard_page(false, html! {
-        h2 #activity { "Activity" }
-        p { "Only showing latest " (ACTIVITY_LIMIT) " activity items." }
+pub async fn dashboard_activity(_auth: Fancy<AuthorizedAdmin>, htmx: Htmx) -> database::Result<HttpResponse> {
+    const ACTIVITY_LIMIT: usize = 100;
+    let main = html! {
         @let activities = DATABASE.run(|conn| {
             use crate::schema::activities::dsl;
             dsl::activities
                 .select(Activity::as_select())
                 .order(dsl::id.desc())
-                .limit(ACTIVITY_LIMIT)
+                .limit(ACTIVITY_LIMIT as i64 + 1)
                 .get_results(conn)
         })?;
+        @if activities.len() > ACTIVITY_LIMIT {
+            p { "Only showing latest " (ACTIVITY_LIMIT) " activity items." }
+        }
         table style="width: 100%" {
             thead {
                 tr {
@@ -79,7 +80,7 @@ pub async fn dashboard_activity(_auth: Fancy<AuthorizedAdmin>) -> database::Resu
                 }
             }
             tbody {
-                @for activity in activities {
+                @for activity in &activities[..std::cmp::min(ACTIVITY_LIMIT, activities.len())] {
                     tr.bg[!activity.allowed].color[!activity.allowed].bad[!activity.allowed] {
                         td { @if let Some(user) = &activity.user { a href={ "#" (user) } { (user) } } }
                         td { (activity.ip.deref()) }
@@ -97,7 +98,17 @@ pub async fn dashboard_activity(_auth: Fancy<AuthorizedAdmin>) -> database::Resu
                 }
             }
         }
-    })))
+    };
+    Ok(HttpResponse::Ok().body(if htmx.is_htmx {
+        main
+    } else {
+        dashboard_page(false, html! {
+            h2 #activity { "Activity" " " span.chip.bad."<small>" { "⏺ Live" } }
+            div hx-get={ (ARGS.dashboard) "/activity" } hx-trigger="every 1s" {
+                (main)
+            }
+        })
+    }))
 }
 
 pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpResponse> {
