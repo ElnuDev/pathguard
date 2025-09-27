@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use actix_web::{http::StatusCode, ResponseError};
+use diesel::connection::SimpleConnection;
 use diesel::insert_or_ignore_into;
 use diesel::prelude::*;
 use diesel::r2d2::ConnectionManager;
@@ -10,6 +11,7 @@ use diesel_migrations::{EmbeddedMigrations, embed_migrations};
 use maud::html;
 use maud::Render;
 use r2d2::{Pool, PooledConnection};
+use sql_minifier::macros::load_sql;
 use thiserror::Error;
 
 use crate::models::group::DEFAULT_GROUP;
@@ -55,11 +57,23 @@ impl ResponseError for DatabaseError {
 pub type Result<T> = std::result::Result<T, DatabaseError>;
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
+#[derive(Debug)]
+struct ConnectionCustomizer;
+
+impl diesel::r2d2::CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for ConnectionCustomizer {
+    fn on_acquire(&self, conn: &mut SqliteConnection) -> std::result::Result<(), diesel::r2d2::Error> {
+        conn
+            .batch_execute(load_sql!("src/database.sql"))
+            .map_err(diesel::r2d2::Error::QueryError)
+    }
+}
+
 impl Database {
     pub fn new(path: &str) -> Result<Self> {
         fs::create_dir_all(PathBuf::from(path).parent().unwrap()).unwrap();
         let manager = ConnectionManager::<SqliteConnection>::new(path);
         let connection_pool = Pool::builder()
+            .connection_customizer(Box::new(ConnectionCustomizer))
             .test_on_check_out(true)
             .build(manager)
             .expect("Could not build connection pool");
@@ -95,7 +109,6 @@ impl Database {
         F: FnOnce(&mut PooledConnection<ConnectionManager<SqliteConnection>>) -> QueryResult<R>,
     {
         let mut conn = self.conn()?;
-        //sql_query("PRAGMA foreign keys = ON;").execute(&mut conn)?;
         Ok(f(&mut conn)?)
     }
 

@@ -3,4 +3,6 @@
 result
 
 database.db
+database.db-wal
+database.db-shm
 session.key

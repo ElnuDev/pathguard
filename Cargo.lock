@@ -1386,6 +1386,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "241eaef5fd12c88705a01fc1066c48c4b36e0dd4377dcdc7ec3942cea7a69956"
 
 [[package]]
+name = "load_sql_proc"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87400d04d591c8a396aa25b3ebe3db2a24500ab7be183119176b6b3bfa5aa1ce"
+dependencies = [
+ "minify_sql",
+ "quote",
+ "regex",
+ "syn 2.0.106",
+]
+
+[[package]]
 name = "local-channel"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1483,6 +1495,28 @@ checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
 dependencies = [
  "mime",
  "unicase",
+]
+
+[[package]]
+name = "minify_sql"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d775831738540c67f62c357671c2ad4f34ca2d3b48172e406a581adadbb658ac"
+dependencies = [
+ "quote",
+ "regex",
+]
+
+[[package]]
+name = "minify_sql_proc"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "092fa1c81200e2576bca47e2063401b8c2be787faca974c0a49cf5ba6a3af3de"
+dependencies = [
+ "minify_sql",
+ "quote",
+ "regex",
+ "syn 2.0.106",
 ]
 
 [[package]]
@@ -1604,6 +1638,7 @@ dependencies = [
  "qstring",
  "r2d2",
  "serde",
+ "sql_minifier",
  "thiserror",
  "urlencoding",
  "webformd",
@@ -2033,6 +2068,17 @@ checksum = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "sql_minifier"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9bd6b358428960c59c72846d916d2838b667f27869382589ffd75d17567f330"
+dependencies = [
+ "load_sql_proc",
+ "minify_sql",
+ "minify_sql_proc",
 ]
 
 [[package]]
