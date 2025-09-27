@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::{models::user::ADMIN_USERNAME, ARGS, HTMX, LOGOUT_ROUTE, MISSING_CSS, OVERRIDE_CSS, SCRIPT};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
@@ -29,15 +31,17 @@ pub fn fancy_page(before_main: Markup, main: Markup) -> Markup {
 }
 
 pub fn dashboard_page(root: bool, main: Markup) -> Markup {
-    let root = root.then_some("").unwrap_or(&*ARGS.dashboard);
+    let root = root
+        .then_some(Cow::Borrowed("#"))
+        .unwrap_or_else(|| Cow::Owned(ARGS.dashboard.to_string() + "#"));
     fancy_page(
         html! {
             header.navbar {
                 nav {
                     ul role="list" {
                         li { a.allcaps href=(root) { "pathguard" } }
-                        li { a href={ (root) "#groups" } { "Groups" } }
-                        li { a href={ (root) "#users" } { "Users" } }
+                        li { a href={ (root) "groups" } { "Groups" } }
+                        li { a href={ (root) "users" } { "Users" } }
                         li { a href={ (ARGS.dashboard) "/activity" } { "Activity" } }
                     }
                 }
