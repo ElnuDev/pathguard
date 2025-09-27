@@ -1,10 +1,7 @@
 use maud::{html, Markup, Render};
 
 use crate::{
-    dashboard::{CHEVRON_DOWN, CHEVRON_UP, PLUS, TRASH},
-    database,
-    templates::{const_icon_button, icon_button},
-    ARGS, DATABASE, GROUPS_ROUTE,
+    ARGS, DATABASE, GROUPS_ROUTE, dashboard::{self, CHEVRON_DOWN, CHEVRON_UP, PLUS, TRASH}, database, templates::{const_icon_button, icon_button}
 };
 
 use crate::schema::*;
@@ -34,16 +31,32 @@ pub struct Rule {
 
 impl Render for Rule {
     fn render(&self) -> Markup {
+        let Rule { group, path, .. } = self;
+        let dashboard = &*ARGS.dashboard;
         html! {
             div {
                 @let path_encoded = urlencoding::encode(&self.path);
                 div {
                     (icon_button(
                         TRASH,
-                        &format!("hx-delete=\"{dashboard}/groups/{group}/rules/{path_encoded}\" hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\" hx-confirm=\"Are you sure you want to delete this rule?\"",
-                            dashboard=ARGS.dashboard,
-                            group=self.group),
+                        &format!("hx-delete=\"{dashboard}/groups/{group}/rules/{path_encoded}\" \
+                            hx-swap=\"outerHTML\" hx-target=\"closest .table.rows > div\" \
+                            hx-confirm=\"Are you sure you want to delete this rule?\""),
                         Some("bad")
+                    ))
+                    (icon_button(
+                        CHEVRON_UP,
+                        &format!("hx-post=\"{dashboard}/groups/{group}/rules/{path_encoded}/up\" \
+                            hx-swap=\"none\" \
+                            hx-on::after-swap=\"swapUp(this.parentElement.parentElement)\""),
+                        None
+                    ))
+                    (icon_button(
+                        CHEVRON_DOWN,
+                        &format!("hx-post=\"{dashboard}/groups/{group}/rules/{path_encoded}/down\" \
+                            hx-swap=\"none\"
+                            hx-on::after-swap=\"swapDown(this.parentElement.parentElement)\""),
+                        None
                     ))
                 }
                 div { (self.path) }

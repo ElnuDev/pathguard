@@ -831,6 +831,98 @@ pub async fn post_group_down(
     })
 }
 
+pub async fn post_rule_up(
+    _auth: AuthorizedAdmin,
+    path: web::Path<(String, String)>,
+) -> database::Result<HttpResponse> {
+    let (group, path) = path.into_inner();
+    DATABASE.run(|conn| {
+        use crate::schema::rules::dsl;
+        let Some(current_sort): Option<i32> = dsl::rules
+            .select(dsl::sort)
+            .filter(dsl::group.eq(&group))
+            .filter(dsl::path.eq(&path))
+            .get_result(conn)
+            .optional()?
+        else
+        {
+            return Ok(HttpResponse::NotFound().finish());
+        };
+        let Some((previous_path, previous_sort)): Option<(String, i32)> = dsl::rules
+            .select((dsl::path, dsl::sort))
+            .filter(dsl::group.eq(&group))
+            .filter(dsl::sort.lt(current_sort))
+            .order(dsl::sort.desc())
+            .get_result(conn)
+            .optional()?
+        else
+        {
+            return Ok(ErrorConflict("can't move top group up any further").error_response());
+        };
+        // Swap sort values with previous
+        conn.transaction(|conn| {
+            update(dsl::rules)
+                .set(dsl::sort.eq(current_sort))
+                .filter(dsl::group.eq(&group))
+                .filter(dsl::path.eq(&previous_path))
+                .execute(conn)?;
+            update(dsl::rules)
+                .set(dsl::sort.eq(previous_sort))
+                .filter(dsl::group.eq(&group))
+                .filter(dsl::path.eq(&path))
+                .execute(conn)?;
+            Result::<(), diesel::result::Error>::Ok(())
+        })?;
+        Ok(HttpResponse::Ok().finish())
+    })
+}
+
+pub async fn post_rule_down(
+    _auth: AuthorizedAdmin,
+    path: web::Path<(String, String)>,
+) -> database::Result<HttpResponse> {
+    let (group, path) = path.into_inner();
+    DATABASE.run(|conn| {
+        use crate::schema::rules::dsl;
+        let Some(current_sort): Option<i32> = dsl::rules
+            .select(dsl::sort)
+            .filter(dsl::group.eq(&group))
+            .filter(dsl::path.eq(&path))
+            .get_result(conn)
+            .optional()?
+        else
+        {
+            return Ok(HttpResponse::NotFound().finish());
+        };
+        let Some((previous_path, previous_sort)): Option<(String, i32)> = dsl::rules
+            .select((dsl::path, dsl::sort))
+            .filter(dsl::group.eq(&group))
+            .filter(dsl::sort.gt(current_sort))
+            .order(dsl::sort)
+            .get_result(conn)
+            .optional()?
+        else
+        {
+            return Ok(ErrorConflict("can't move bottom group down any further").error_response());
+        };
+        // Swap sort values with next
+        conn.transaction(|conn| {
+            update(dsl::rules)
+                .set(dsl::sort.eq(current_sort))
+                .filter(dsl::group.eq(&group))
+                .filter(dsl::path.eq(&previous_path))
+                .execute(conn)?;
+            update(dsl::rules)
+                .set(dsl::sort.eq(previous_sort))
+                .filter(dsl::group.eq(&group))
+                .filter(dsl::path.eq(&path))
+                .execute(conn)?;
+            Result::<(), diesel::result::Error>::Ok(())
+        })?;
+        Ok(HttpResponse::Ok().finish())
+    })
+}
+
 pub fn login_form(invalid: bool, return_uri: &str) -> Markup {
     html! {
         @let action = html! {
