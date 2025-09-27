@@ -5,7 +5,7 @@ use crate::{
         group::{self, Rule, DEFAULT_GROUP},
         user::{UserDisplayMode, UserRenderContext, UserWithGroups, ADMIN_USERNAME},
         Activity, Group, User,
-    }, templates::{const_icon_button, dashboard_page}, ARGS, DATABASE, GROUPS_ROUTE, LOGIN_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE
+    }, templates::{const_icon_button, dashboard_page, icon_button}, ACTIVITY_ROUTE, ARGS, DATABASE, GROUPS_ROUTE, LOGIN_ROUTE, PASSWORD_GENERATOR, USERS_ROUTE
 };
 use actix_htmx::Htmx;
 use actix_session::Session;
@@ -56,57 +56,157 @@ pub fn timestamp(utc: &NaiveDateTime) -> Markup {
     }
 }
 
-pub async fn dashboard_activity(_auth: Fancy<AuthorizedAdmin>, htmx: Htmx) -> database::Result<HttpResponse> {
-    const ACTIVITY_LIMIT: usize = 100;
-    let main = html! {
-        @let activities = DATABASE.run(|conn| {
-            use crate::schema::activities::dsl;
+#[derive(Deserialize)]
+pub struct ActivityQuery {
+    #[serde(default)]
+    live: bool,
+    #[serde(default = "default_page")]
+    page: i64,
+}
+
+fn default_page() -> i64 {
+    1
+}
+
+pub async fn dashboard_activity(
+    _auth: Fancy<AuthorizedAdmin>,
+    req: HttpRequest,
+    htmx: Htmx,
+    web::Query(ActivityQuery { page, mut live }): web::Query<ActivityQuery>,
+) -> database::Result<HttpResponse> {
+    live = live || !htmx.is_htmx || htmx.boosted;
+    let redirect = || -> database::Result<HttpResponse> {
+        if htmx.is_htmx && !htmx.boosted {
+            return Ok(HttpResponse::NotFound().finish());
+        }
+        let redirect = ARGS.dashboard.to_string() + ACTIVITY_ROUTE;
+        if htmx.is_htmx {
+            htmx.redirect(redirect);
+            return Ok(HttpResponse::Ok().finish());
+        }
+        return Ok(Redirect::to(redirect).respond_to(&req).map_into_boxed_body());
+    };
+    if page <= 0 {
+        return redirect();
+    }
+    const ACTIVITY_LIMIT: i64 = 25;
+    let (count, activities): (i64, Vec<Activity>) = DATABASE.run(|conn| {
+        use crate::schema::activities::dsl;
+        Ok((
+            dsl::activities
+                .count()
+                .get_result(conn)?,
             dsl::activities
                 .select(Activity::as_select())
                 .order(dsl::id.desc())
-                .limit(ACTIVITY_LIMIT as i64 + 1)
-                .get_results(conn)
-        })?;
-        @if activities.len() > ACTIVITY_LIMIT {
-            p { "Only showing latest " (ACTIVITY_LIMIT) " activity items." }
-        }
-        table style="width: 100%" {
-            thead {
-                tr {
-                    th scope="col" { "User" }
-                    th scope="col" { "IP" }
-                    th scope="col" { "Path" }
-                    th scope="col" { "Timestamp (UTC)" }
+                .limit(ACTIVITY_LIMIT)
+                .offset(ACTIVITY_LIMIT * (page - 1) as i64)
+                .get_results(conn)?,
+        ))
+    })?;
+    let page_count = (count - 1) / ACTIVITY_LIMIT + 1;
+    if page > 1 && activities.is_empty() {
+        return redirect();
+    }
+
+    const CHEVRON_DOUBLE_LEFT_: &str = "chevron-double-left";
+    const CHEVRON_DOUBLE_LEFT: &str = CHEVRON_DOUBLE_LEFT_;
+
+    const CHEVRON_LEFT_: &str = "chevron-left";
+    const CHEVRON_LEFT: &str = CHEVRON_LEFT_;
+
+    const CHEVRON_RIGHT_: &str = "chevron-right";
+    const CHEVRON_RIGHT: &str = CHEVRON_RIGHT_;
+
+    const CHEVRON_DOUBLE_RIGHT_: &str = "chevron-double-right";
+    const CHEVRON_DOUBLE_RIGHT: &str = CHEVRON_DOUBLE_RIGHT_;
+
+    let main = html! {
+        .activities
+            hx-get=[live.then(|| ARGS.dashboard.to_string() + "/activity?live=true")]
+            hx-trigger=[live.then_some("every 1s")]
+            hx-swap="outerHTML"
+        {
+            h2 #activity {
+                "Activity"
+                @if live {
+                    " " span.chip.bad."<small>" { "⏺ Live" }
                 }
             }
-            tbody {
-                @for activity in &activities[..std::cmp::min(ACTIVITY_LIMIT, activities.len())] {
-                    tr.bg[!activity.allowed].color[!activity.allowed].bad[!activity.allowed] {
-                        td { @if let Some(user) = &activity.user { a href={ "#" (user) } { (user) } } }
-                        td { (activity.ip.deref()) }
-                        td {
-                            a
-                                target="_blank"
-                                href=(activity.path)
-                                hx-boost="false"
-                            {
-                                (activity.path)
+            @let pagination = html! {
+                div style="display: flex; justify-content: center; position: relative" {
+                    @let page_button = |icon: &str, page: i64, attrs: &str| icon_button(
+                        icon,
+                        &format!(
+                            "hx-get=\"{dashboard}{ACTIVITY_ROUTE}?page={page}\" hx-target=\"closest .activities\" hx-swap=\"outerHTML\" {attrs}",
+                            dashboard=ARGS.dashboard,
+                        ),
+                        None,
+                    );
+                    @if page > 1 {
+                        (page_button(CHEVRON_DOUBLE_LEFT, 1, ""))
+                        (page_button(CHEVRON_LEFT, page - 1, "style=\"margin-right: auto\""))
+                    }
+                    span style="position: absolute; left: 50%; transform: translateX(-50%)" { "Page " (page) " of " (page_count) }
+                    @if page < page_count {
+                        (page_button(CHEVRON_RIGHT, page + 1, "style=\"margin-left: auto\""))
+                        (page_button(CHEVRON_DOUBLE_RIGHT, page_count, ""))
+                    }
+                }
+            };
+            (pagination)
+            table style="width: 100%" {
+                thead {
+                    tr {
+                        th scope="col" { "User" }
+                        th scope="col" { "IP" }
+                        th scope="col" { "Path" }
+                        th scope="col" { "Timestamp (UTC)" }
+                    }
+                }
+                tbody {
+                    @for activity in activities {
+                        tr.bg[!activity.allowed].color[!activity.allowed].bad[!activity.allowed] {
+                            td { @if let Some(user) = &activity.user { a href={ "#" (user) } { (user) } } }
+                            td { (activity.ip.deref()) }
+                            td {
+                                a
+                                    target="_blank"
+                                    href=(activity.path)
+                                    hx-boost="false"
+                                {
+                                    (activity.path)
+                                }
                             }
+                            td { (timestamp(&activity.timestamp)) }
                         }
-                        td { (timestamp(&activity.timestamp)) }
                     }
                 }
             }
+            (pagination)
         }
     };
-    Ok(HttpResponse::Ok().body(if htmx.is_htmx {
-        main
+    Ok(HttpResponse::Ok().body(if htmx.is_htmx && !htmx.boosted {
+        html! {
+            (main)
+        }
     } else {
         dashboard_page(false, html! {
-            h2 #activity { "Activity" " " span.chip.bad."<small>" { "⏺ Live" } }
-            div hx-get={ (ARGS.dashboard) "/activity" } hx-trigger="every 1s" {
-                (main)
+            svg xmlns="http://www.w3.org/2000/svg" style="display: none" {
+                symbol #(CHEVRON_DOUBLE_LEFT_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                    (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m18.75 4.5-7.5 7.5 7.5 7.5m-6-15L5.25 12l7.5 7.5" />"#))
+                }
+                symbol #(CHEVRON_LEFT_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                    (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />"#))
+                }
+                symbol #(CHEVRON_RIGHT_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                    (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />"#))
+                }
+                symbol #(CHEVRON_DOUBLE_RIGHT_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+                    (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m5.25 4.5 7.5 7.5-7.5 7.5m6-15 7.5 7.5-7.5 7.5" />"#))
+                }
             }
+            (main)
         })
     }))
 }
