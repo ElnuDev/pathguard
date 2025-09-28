@@ -1,7 +1,7 @@
 use maud::{html, Markup, Render};
 
 use crate::{
-    ARGS, DATABASE, GROUPS_ROUTE, dashboard::{self, CHEVRON_DOWN, CHEVRON_UP, PLUS, TRASH}, database, templates::{const_icon_button, icon_button}
+    ARGS, DATABASE, GROUPS_ROUTE, dashboard::{CHEVRON_DOWN, CHEVRON_UP, PLUS, TRASH}, database, templates::{const_icon_button, icon_button}
 };
 
 use crate::schema::*;
@@ -31,7 +31,7 @@ pub struct Rule {
 
 impl Render for Rule {
     fn render(&self) -> Markup {
-        let Rule { group, path, .. } = self;
+        let group = &self.group;
         let dashboard = &*ARGS.dashboard;
         html! {
             div {
