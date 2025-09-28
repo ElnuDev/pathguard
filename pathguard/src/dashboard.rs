@@ -91,7 +91,7 @@ pub async fn dashboard_activity(
         path_search,
     }): web::Query<ActivityQuery>,
 ) -> database::Result<HttpResponse> {
-    live = user_search.is_none() && path_search.is_none() && (live || !htmx.is_htmx || htmx.boosted);
+    live = live || !htmx.is_htmx || htmx.boosted;
     let redirect = || -> database::Result<HttpResponse> {
         if htmx.is_htmx && !htmx.boosted {
             return Ok(HttpResponse::NotFound().finish());
@@ -150,9 +150,36 @@ pub async fn dashboard_activity(
     const CHEVRON_DOUBLE_RIGHT_: &str = "chevron-double-right";
     const CHEVRON_DOUBLE_RIGHT: &str = CHEVRON_DOUBLE_RIGHT_;
 
+    let tmp;
+    let search_params = match user_search.is_some() || path_search.is_some() {
+        true => {
+            fn flatten<'a>(maybe_string: &'a Option<String>) -> &'a str {
+                maybe_string
+                    .as_ref()
+                    .map(|string| string.as_str())
+                    .unwrap_or_default()
+            }
+            tmp = format!(
+                "user={user_search}&path={path_search}",
+                user_search=flatten(&user_search),
+                path_search=flatten(&path_search),
+            );
+            &tmp
+        },
+        false => "",
+    };
+    let tmp2;
+    let params = match page {
+        1 => search_params,
+        _ => {
+            tmp2 = format!("page={page}&{search_params}");
+            &tmp2
+        },
+    };
+
     let main = html! {
         .activities
-            hx-get=[live.then(|| ARGS.dashboard.to_string() + "/activity?live=true")]
+            hx-get=[live.then(|| ARGS.dashboard.to_string() + "/activity?live=true&" + params)]
             hx-trigger=[live.then_some("every 1s")]
             hx-swap="outerHTML"
         {
@@ -170,7 +197,11 @@ pub async fn dashboard_activity(
                     @let page_button = |icon: &str, page: i64, attrs: &str| icon_button(
                         icon,
                         &format!(
-                            "hx-get=\"{dashboard}{ACTIVITY_ROUTE}?page={page}\" hx-target=\"closest .activities\" hx-swap=\"outerHTML\" {attrs}",
+                            "hx-get=\"{dashboard}{ACTIVITY_ROUTE}?page={page}&{search_params}\" \
+                                hx-target=\"closest .activities\" \
+                                hx-swap=\"outerHTML\" \
+                                hx-replace-url=\"true\" \
+                                {attrs}",
                             dashboard=ARGS.dashboard,
                         ),
                         None,
