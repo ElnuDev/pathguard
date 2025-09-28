@@ -62,10 +62,18 @@ pub struct ActivityQuery {
     live: bool,
     #[serde(default = "default_page")]
     page: i64,
-    #[serde(default, rename = "user")]
+    #[serde(default, deserialize_with = "empty_string_is_none", rename = "user")]
     user_search: Option<String>,
-    #[serde(default, rename = "path")]
+    #[serde(default, deserialize_with = "empty_string_is_none", rename = "path")]
     path_search: Option<String>,
+}
+
+fn empty_string_is_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok((!s.is_empty()).then_some(s))
 }
 
 fn default_page() -> i64 {
@@ -211,9 +219,7 @@ pub async fn dashboard_activity(
         }
     };
     Ok(HttpResponse::Ok().body(if htmx.is_htmx && !htmx.boosted {
-        html! {
-            (main)
-        }
+        main
     } else {
         dashboard_page(false, html! {
             svg xmlns="http://www.w3.org/2000/svg" style="display: none" {
@@ -228,6 +234,24 @@ pub async fn dashboard_activity(
                 }
                 symbol #(CHEVRON_DOUBLE_RIGHT_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
                     (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m5.25 4.5 7.5 7.5-7.5 7.5m6-15 7.5 7.5-7.5 7.5" />"#))
+                }
+            }
+            form.table.rows.margin-block-end
+                hx-get={ (ARGS.dashboard) (ACTIVITY_ROUTE) }
+                hx-swap="outerHTML"
+                hx-target="next"
+                hx-trigger="input"
+                hx-replace-url="true"
+                autocomplete="off"
+            {
+                h3 { "Search" }
+                div {
+                    div { "User:" }
+                    div { input type="text" name="user" value=[user_search]; }
+                }
+                div {
+                    div { "Path:" }
+                    div { input type="text" name="path" value=[path_search]; }
                 }
             }
             (main)
