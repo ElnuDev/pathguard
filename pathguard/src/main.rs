@@ -27,6 +27,9 @@ use maud::html;
 use clap::{Parser, Subcommand};
 use passwords::PasswordGenerator;
 
+use static_web_minify::minify_js_file;
+use const_css_minify::minify as minify_css_file;
+
 use crate::{
     auth::{Authorized, Fancy, Unauthorized},
     dashboard::*,
@@ -169,7 +172,7 @@ async fn main() -> std::io::Result<()> {
                 res
             }))
             .service(web::resource(SCRIPT).get(async || {
-                let mut res = HttpResponse::Ok().body(include_str!("script.js"));
+                let mut res = HttpResponse::Ok().body(minify_js_file!("pathguard/src/script.js"));
                 res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("application/javascript").unwrap());
                 res
             }))
@@ -179,7 +182,7 @@ async fn main() -> std::io::Result<()> {
                 res
             }))
             .service(web::resource(OVERRIDE_CSS).get(async || {
-                let mut res = HttpResponse::Ok().body(include_str!("override.css"));
+                let mut res = HttpResponse::Ok().body(minify_css_file!("pathguard/src/override.css"));
                 res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("text/css").unwrap());
                 res
             }));
