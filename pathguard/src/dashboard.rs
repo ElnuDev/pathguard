@@ -155,7 +155,10 @@ pub async fn dashboard_activity(
                 }
             }
             @let pagination = html! {
-                div style="display: flex; justify-content: center; position: relative" {
+                // height is necessary because if there is only one element,
+                // the parent div will be of height zero and the absolute span
+                // will overlap the table below
+                div style="display: flex; justify-content: center; position: relative; height: 1.5em" {
                     @let page_button = |icon: &str, page: i64, attrs: &str| icon_button(
                         icon,
                         &format!(
