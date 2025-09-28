@@ -165,7 +165,16 @@ async fn main() -> std::io::Result<()> {
                 }))
             ))
             .service(web::resource(HTMX).get(async || {
-                let mut res = HttpResponse::Ok().body(include_str!("htmx.min.js"));
+                let mut res = HttpResponse::Ok().body({
+                    #[cfg(debug_assertions)]
+                    {
+                        include_str!("htmx.js")
+                    }
+                    #[cfg(not(debug_assertions))]
+                    {
+                        include_str!("htmx.min.js")
+                    }
+                });
                 res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("application/javascript").unwrap());
                 res
             }))
