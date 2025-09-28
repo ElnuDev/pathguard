@@ -167,7 +167,7 @@ pub async fn dashboard_activity(
                 tbody {
                     @for activity in activities {
                         tr.bg[!activity.allowed].color[!activity.allowed].bad[!activity.allowed] {
-                            td { @if let Some(user) = &activity.user { a href={ "#" (user) } { (user) } } }
+                            td { @if let Some(user) = &activity.user { a href={ (ARGS.dashboard) "#" (user) } { (user) } } }
                             td { (activity.ip.deref()) }
                             td {
                                 a
