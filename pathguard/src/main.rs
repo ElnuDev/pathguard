@@ -27,9 +27,6 @@ use maud::html;
 use clap::{Parser, Subcommand};
 use passwords::PasswordGenerator;
 
-use static_web_minify::minify_js_file;
-use const_css_minify::minify as minify_css_file;
-
 use crate::{
     auth::{Authorized, Fancy, Unauthorized},
     dashboard::*,
@@ -117,6 +114,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .wrap(middleware::DefaultHeaders::new().add((CONTENT_TYPE, TEXT_HTML_UTF_8)))
             .wrap({
+                #[allow(unused_mut)]
                 let mut builder = SessionMiddleware::builder(CookieSessionStore::default(), key.clone())
                     .cookie_name("pathguard_id".to_owned());
                 #[cfg(debug_assertions)]
@@ -172,7 +170,18 @@ async fn main() -> std::io::Result<()> {
                 res
             }))
             .service(web::resource(SCRIPT).get(async || {
-                let mut res = HttpResponse::Ok().body(minify_js_file!("pathguard/src/script.js"));
+                let mut res = HttpResponse::Ok().body({
+                    #[cfg(debug_assertions)]
+                    {
+                        include_str!("script.js")
+                    }
+                    #[cfg(not(debug_assertions))]
+                    {
+                        // minify_js_file! proc macro doesn't trigger recompiles on file change
+                        include_str!("script.js");
+                        static_web_minify::minify_js_file!("pathguard/src/script.js")
+                    }
+                });
                 res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("application/javascript").unwrap());
                 res
             }))
@@ -182,7 +191,18 @@ async fn main() -> std::io::Result<()> {
                 res
             }))
             .service(web::resource(OVERRIDE_CSS).get(async || {
-                let mut res = HttpResponse::Ok().body(minify_css_file!("pathguard/src/override.css"));
+                let mut res = HttpResponse::Ok().body({
+                    #[cfg(debug_assertions)]
+                    {
+                        include_str!("override.css")
+                    }
+                    #[cfg(not(debug_assertions))]
+                    {
+                        // minify! proc macro doesn't trigger recompiles on file change
+                        include_str!("override.css");
+                        const_css_minify::minify!("pathguard/src/override.css")
+                    }
+                });
                 res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("text/css").unwrap());
                 res
             }));

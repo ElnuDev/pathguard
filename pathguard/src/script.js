@@ -35,15 +35,22 @@ function makeModal() {
 }
 
 document.addEventListener("DOMContentLoaded", _event => {
+    function openHash() {
+        try {
+            const target = document.querySelector(window.location.hash);
+            if (target === null) return;
+            if (target.tagName === "DETAILS") target.setAttribute("open", "");
+        } catch {}
+    }
+    openHash();
+
     document.body.addEventListener("htmx:afterSwap", event => {
         // https://github.com/bigskysoftware/htmx/issues/3447
         if (!event.detail.boosted) return;
         const hash = event.detail.pathInfo.requestPath.split("#")[1];
         if (hash === undefined) return;
         window.location.hash = event.detail.pathInfo.requestPath.split("#")[1];
-        const target = document.getElementById(hash);
-        if (target === null) return;
-        if (target.tagName === "DETAILS") target.setAttribute("open", "");
+        openHash();
     });
 
     document.body.addEventListener("htmx:beforeSwap", event => {
