@@ -62,6 +62,10 @@ pub struct ActivityQuery {
     live: bool,
     #[serde(default = "default_page")]
     page: i64,
+    #[serde(default, rename = "user")]
+    user_search: Option<String>,
+    #[serde(default, rename = "path")]
+    path_search: Option<String>,
 }
 
 fn default_page() -> i64 {
@@ -72,9 +76,14 @@ pub async fn dashboard_activity(
     _auth: Fancy<AuthorizedAdmin>,
     req: HttpRequest,
     htmx: Htmx,
-    web::Query(ActivityQuery { page, mut live }): web::Query<ActivityQuery>,
+    web::Query(ActivityQuery {
+        mut live,
+        page,
+        user_search,
+        path_search,
+    }): web::Query<ActivityQuery>,
 ) -> database::Result<HttpResponse> {
-    live = live || !htmx.is_htmx || htmx.boosted;
+    live = user_search.is_none() && path_search.is_none() && (live || !htmx.is_htmx || htmx.boosted);
     let redirect = || -> database::Result<HttpResponse> {
         if htmx.is_htmx && !htmx.boosted {
             return Ok(HttpResponse::NotFound().finish());
@@ -84,7 +93,9 @@ pub async fn dashboard_activity(
             htmx.redirect(redirect);
             return Ok(HttpResponse::Ok().finish());
         }
-        return Ok(Redirect::to(redirect).respond_to(&req).map_into_boxed_body());
+        return Ok(Redirect::to(redirect)
+            .respond_to(&req)
+            .map_into_boxed_body());
     };
     if page <= 0 {
         return redirect();
@@ -92,11 +103,21 @@ pub async fn dashboard_activity(
     const ACTIVITY_LIMIT: i64 = 25;
     let (count, activities): (i64, Vec<Activity>) = DATABASE.run(|conn| {
         use crate::schema::activities::dsl;
+        let filtered = || {
+            let mut query = dsl::activities.into_boxed();
+            if let Some(search) = &user_search {
+                query = query.filter(dsl::user.like(format!("%{search}%")))
+            }
+            if let Some(search) = &path_search {
+                query = query.filter(dsl::path.like(format!("%{search}%")))
+            }
+            query
+        };
         Ok((
-            dsl::activities
+            filtered()
                 .count()
                 .get_result(conn)?,
-            dsl::activities
+            filtered()
                 .select(Activity::as_select())
                 .order(dsl::id.desc())
                 .limit(ACTIVITY_LIMIT)
