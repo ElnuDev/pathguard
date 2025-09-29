@@ -57,6 +57,7 @@ pub fn timestamp(utc: &NaiveDateTime) -> Markup {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActivityQuery {
     #[serde(default)]
     live: bool,
@@ -66,6 +67,24 @@ pub struct ActivityQuery {
     user_search: Option<String>,
     #[serde(default, deserialize_with = "empty_string_is_none", rename = "path")]
     path_search: Option<String>,
+    #[serde(default, deserialize_with = "bool_on_off")]
+    ignore_blocked: bool,
+    #[serde(default, deserialize_with = "bool_on_off")]
+    ignore_anonymous: bool,
+}
+
+pub fn bool_on_off<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    match s.as_str() {
+        "true" | "on" => Ok(true),
+        "false" | "off" => Ok(false),
+        other => Err(serde::de::Error::custom(format!(
+            "invalid value for bool: {other}",
+        ))),
+    }
 }
 
 fn empty_string_is_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -80,6 +99,7 @@ fn default_page() -> i64 {
     1
 }
 
+
 pub async fn dashboard_activity(
     _auth: Fancy<AuthorizedAdmin>,
     req: HttpRequest,
@@ -89,6 +109,8 @@ pub async fn dashboard_activity(
         page,
         user_search,
         path_search,
+        ignore_blocked,
+        ignore_anonymous,
     }): web::Query<ActivityQuery>,
 ) -> database::Result<HttpResponse> {
     live = live || !htmx.is_htmx || htmx.boosted;
@@ -119,6 +141,12 @@ pub async fn dashboard_activity(
             }
             if let Some(search) = &path_search {
                 query = query.filter(dsl::path.like(format!("%{search}%")))
+            }
+            if ignore_blocked {
+                query = query.filter(dsl::allowed.eq(true));
+            }
+            if ignore_anonymous {
+                query = query.filter(dsl::user.is_not_null());
             }
             query
         };
@@ -152,32 +180,29 @@ pub async fn dashboard_activity(
     const CHEVRON_DOUBLE_RIGHT_: &str = "chevron-double-right";
     const CHEVRON_DOUBLE_RIGHT: &str = CHEVRON_DOUBLE_RIGHT_;
 
+    let search_params = {
+        fn flatten<'a>(maybe_string: &'a Option<String>) -> &'a str {
+            maybe_string
+                .as_ref()
+                .map(|string| string.as_str())
+                .unwrap_or_default()
+        }
+        format!(
+            "user={user_search}&path={path_search}&ignoreBlocked={ignore_blocked}&ignoreAnonymous={ignore_anonymous}",
+            user_search=flatten(&user_search),
+            path_search=flatten(&path_search),
+        )
+    };
+
     let tmp;
-    let search_params = match user_search.is_some() || path_search.is_some() {
-        true => {
-            fn flatten<'a>(maybe_string: &'a Option<String>) -> &'a str {
-                maybe_string
-                    .as_ref()
-                    .map(|string| string.as_str())
-                    .unwrap_or_default()
-            }
-            tmp = format!(
-                "user={user_search}&path={path_search}",
-                user_search=flatten(&user_search),
-                path_search=flatten(&path_search),
-            );
+    let params = match page {
+        1 => &search_params,
+        _ => {
+            tmp = format!("page={page}&{search_params}");
             &tmp
         },
-        false => "",
     };
-    let tmp2;
-    let params = match page {
-        1 => search_params,
-        _ => {
-            tmp2 = format!("page={page}&{search_params}");
-            &tmp2
-        },
-    };
+    let _ = tmp;
 
     let main = html! {
         .activities
@@ -277,7 +302,7 @@ pub async fn dashboard_activity(
                     (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m5.25 4.5 7.5 7.5-7.5 7.5m6-15 7.5 7.5-7.5 7.5" />"#))
                 }
             }
-            form.table.rows.margin-block-end
+            form.margin-block-end
                 hx-get={ (ARGS.dashboard) (ACTIVITY_ROUTE) }
                 hx-swap="outerHTML"
                 hx-target="next"
@@ -285,14 +310,27 @@ pub async fn dashboard_activity(
                 hx-replace-url="true"
                 autocomplete="off"
             {
-                h3 { "Search" }
-                div {
-                    div { "User:" }
-                    div { input type="text" name="user" value=[user_search]; }
-                }
-                div {
-                    div { "Path:" }
-                    div { input type="text" name="path" value=[path_search]; }
+                fieldset {
+                    legend { "Search" }
+                    div.table.rows {
+                        div {
+                            div { "User:" }
+                            div { input type="text" name="user" value=[user_search]; }
+                        }
+                        div {
+                            div { "Path:" }
+                            div { input type="text" name="path" value=[path_search]; }
+                        }
+                    }
+                    br;
+                    label {
+                        input type="checkbox" name="ignoreBlocked" role="switch";
+                        "Ignore blocked"
+                    }
+                    label {
+                        input type="checkbox" name="ignoreAnonymous" role="switch";
+                        "Ignore anonymous"
+                    }
                 }
             }
             (main)
