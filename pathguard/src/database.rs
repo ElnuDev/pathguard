@@ -132,8 +132,11 @@ impl Database {
 
     pub fn users(&self) -> Result<Vec<User>> {
         self.run(|conn| {
-            use crate::schema::users::dsl::*;
-            users.select(User::as_select()).load(conn)
+            use crate::schema::users::dsl;
+            dsl::users
+                .select(User::as_select())
+                .filter(dsl::deleted.eq(false))
+                .load(conn)
         })
     }
 }

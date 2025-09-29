@@ -109,8 +109,9 @@ pub async fn dashboard_activity(
         return redirect();
     }
     const ACTIVITY_LIMIT: i64 = 25;
-    let (count, activities): (i64, Vec<Activity>) = DATABASE.run(|conn| {
+    let (count, activities): (i64, Vec<(Activity, Option<bool>)>) = DATABASE.run(|conn| {
         use crate::schema::activities::dsl;
+        use crate::schema::users::dsl as users_dsl;
         let filtered = || {
             let mut query = dsl::activities.into_boxed();
             if let Some(search) = &user_search {
@@ -126,7 +127,8 @@ pub async fn dashboard_activity(
                 .count()
                 .get_result(conn)?,
             filtered()
-                .select(Activity::as_select())
+                .left_join(users_dsl::users.on(users_dsl::name.nullable().eq(dsl::user)))
+                .select((Activity::as_select(), users_dsl::deleted.nullable()))
                 .order(dsl::id.desc())
                 .limit(ACTIVITY_LIMIT)
                 .offset(ACTIVITY_LIMIT * (page - 1) as i64)
@@ -228,9 +230,17 @@ pub async fn dashboard_activity(
                     }
                 }
                 tbody {
-                    @for activity in activities {
+                    @for (activity, deleted) in activities {
                         tr.bg[!activity.allowed].color[!activity.allowed].bad[!activity.allowed] {
-                            td { @if let Some(user) = &activity.user { a href={ (ARGS.dashboard) "#" (user) } { (user) } } }
+                            td {
+                                @if let Some(user) = &activity.user {
+                                    @if let Some(true) = deleted {
+                                        (user) " " em { "(deleted)" }
+                                    } @else {
+                                        a href={ (ARGS.dashboard) "#" (user) } { (user) }
+                                    }
+                                }
+                            }
                             td { (activity.ip.deref()) }
                             td {
                                 a
@@ -483,7 +493,7 @@ pub async fn post_user(
     htmx: Htmx,
     web::Form(form): web::Form<Vec<(String, String)>>,
 ) -> Result<HttpResponse, UserError> {
-    let user_form = match UserForm::deserialize(&form) {
+    let UserForm { password, mut groups } = match UserForm::deserialize(&form) {
         Ok(form) => form,
         Err(err) => return Ok(ErrorBadRequest(err).error_response()),
     };
@@ -495,18 +505,32 @@ pub async fn post_user(
     else {
         return Ok(ErrorBadRequest("missing username field").error_response());
     };
-    validate_password(&user_form.password)?;
-    let mut groups = user_form.groups;
+    validate_password(&password)?;
     groups.insert(0, DEFAULT_GROUP.to_string());
-    let user = User::new(name, user_form.password).with_groups(groups);
 
-    DATABASE.run(|conn| {
-        conn.transaction(|conn| {
-            use crate::schema::users::dsl;
-            insert_into(dsl::users).values(user.deref()).execute(conn)?;
-            add_groups(conn, &user.name, user.groups.iter())?;
-            Ok(())
-        })
+    let user = DATABASE.run(|conn| {
+        use crate::schema::users::dsl;
+        Ok(if let Some(created) = update(dsl::users)
+            .filter(dsl::name.eq(&name))
+            .filter(dsl::deleted.eq(true))
+            .set((
+                dsl::deleted.eq(false),
+                dsl::password.eq(&password),
+            ))
+            .returning(dsl::created)
+            .get_result::<NaiveDateTime>(conn)
+            .optional()?
+        {
+            User { name, password, created, deleted: false }
+        } else {
+            let user = User::new(name, password);
+            conn.transaction(|conn| {
+                insert_into(dsl::users).values(&user).execute(conn)?;
+                add_groups(conn, &user.name, groups.iter())?;
+                Result::<(), diesel::result::Error>::Ok(())
+            })?;
+            user
+        }.with_groups(groups))
     })?;
 
     let mut res = HttpResponse::Ok();
@@ -587,6 +611,7 @@ pub async fn patch_user(
             use crate::schema::users::dsl;
             dsl::users
                 .filter(dsl::name.eq(&name))
+                .filter(dsl::deleted.eq(false))
                 .select(dsl::created)
                 .get_result(conn)
                 .optional()?
@@ -611,7 +636,7 @@ pub async fn patch_user(
         })?;
         Ok(Ok(created))
     })? {
-        Ok(created) => User { name, password, created }.with_groups(groups),
+        Ok(created) => User { name, password, created, deleted: false }.with_groups(groups),
         Err(res) => return Ok(res),
     };
 
@@ -637,7 +662,11 @@ pub async fn delete_user(
     Ok(
         if DATABASE.run(|conn| {
             use crate::schema::users::dsl;
-            delete(dsl::users.filter(dsl::name.eq(&name))).execute(conn)
+            update(dsl::users)
+                .filter(dsl::deleted.eq(false))
+                .filter(dsl::name.eq(&name))
+                .set(dsl::deleted.eq(true))
+                .execute(conn)
         })? == 0
         {
             ErrorNotFound("that user doesn't exist").error_response()

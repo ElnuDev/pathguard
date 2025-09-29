@@ -22,6 +22,7 @@ pub struct User {
     pub name: String,
     pub password: String,
     pub created: NaiveDateTime,
+    pub deleted: bool,
 }
 
 impl User {
@@ -30,6 +31,7 @@ impl User {
             name,
             password,
             created: Utc::now().naive_utc(),
+            deleted: false,
         }
     }
 
@@ -145,6 +147,7 @@ impl UserWithGroups {
                     name,
                     password,
                     created,
+                    ..
                 },
             ..
         } = self;

@@ -39,6 +39,7 @@ diesel::table! {
         name -> Text,
         password -> Text,
         created -> Timestamp,
+        deleted -> Bool,
     }
 }
 

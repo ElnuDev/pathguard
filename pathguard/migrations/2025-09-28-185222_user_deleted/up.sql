@@ -1,0 +1,1 @@
+ALTER TABLE users ADD deleted BOOL NOT NULL DEFAULT 0;
