@@ -12,6 +12,7 @@ pub fn fancy_page(before_main: Markup, main: Markup) -> Markup {
         (DOCTYPE)
         html {
             head {
+                meta name="darkreader-lock";
                 script src=(HTMX) {}
                 script src=(SCRIPT) {}
                 link rel="stylesheet" href=(MISSING_CSS);
