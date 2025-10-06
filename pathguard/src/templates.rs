@@ -12,6 +12,7 @@ pub fn fancy_page(before_main: Markup, main: Markup) -> Markup {
         (DOCTYPE)
         html {
             head {
+                title { "pathguard" }
                 meta name="darkreader-lock";
                 script src=(HTMX) {}
                 script src=(SCRIPT) {}
