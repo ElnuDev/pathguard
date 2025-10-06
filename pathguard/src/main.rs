@@ -7,6 +7,7 @@ mod files;
 mod models;
 mod proxy;
 mod templates;
+mod robots_txt;
 
 mod database;
 mod schema;
