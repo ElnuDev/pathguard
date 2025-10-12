@@ -314,8 +314,8 @@ pub async fn files(
                                     (name)
                                 }
                                 span.float:right { ({
-                                    let created: DateTime<Utc> = metadata.created()?.into();
-                                    created.with_nanosecond(0).unwrap()
+                                    let modified: DateTime<Utc> = metadata.modified()?.into();
+                                    modified.with_nanosecond(0).unwrap()
                                 }) }
                             }
                         }
