@@ -44,14 +44,16 @@ dependencies = [
 
 [[package]]
 name = "actix-htmx"
-version = "0.3.2"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25d7f31372328b147b9d33f92babfc1d18ada6e7978a4ae03b0f54ec25c7cd5c"
+checksum = "92278efe1a6c64a0782e680d8efc31c7ae3c9c1a2feeee30367a858f7df0fb71"
 dependencies = [
  "actix-web",
  "futures-util",
  "indexmap",
  "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -614,9 +616,9 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "const-css-minify"
-version = "0.1.8"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a95b840bcbd51a51074f719a9ce2902c37ea64a87f87fe4f4d6bd2277f3ea189"
+checksum = "cb16320721f6441f979feff82c8b4fe789a5423f48e4e724d124211c44be43af"
 
 [[package]]
 name = "const_format"
