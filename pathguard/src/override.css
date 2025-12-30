@@ -1,140 +1,140 @@
 button, .\<button\> {
-    display: inline-flex !important;
+	display: inline-flex !important;
 }
 
 .icon {
-    width: 1em;
-    aspect-ratio: 1;
+	width: 1em;
+	aspect-ratio: 1;
 }
 
 .rule {
-    --size: 1.5em;
-    --on-bg: var(--ok-bg);
-    --on-fg: var(--ok-fg);
-    --off-bg: var(--bad-bg);
-    --off-fg: var(--bad-fg);
-    --fg: white;
-    display: inline-flex !important;
-    height: var(--size);
-    border-radius: var(--size);
-    overflow: hidden;
-    position: relative;
-    outline: 2px solid var(--fg);
-    transition: 0.25s;
+	--size: 1.5em;
+	--on-bg: var(--ok-bg);
+	--on-fg: var(--ok-fg);
+	--off-bg: var(--bad-bg);
+	--off-fg: var(--bad-fg);
+	--fg: white;
+	display: inline-flex !important;
+	height: var(--size);
+	border-radius: var(--size);
+	overflow: hidden;
+	position: relative;
+	outline: 2px solid var(--fg);
+	transition: 0.25s;
 }
 
 .rule::after {
-    content: "";
-    width: var(--size);
-    height: var(--size);
-    background: var(--fg);
-    position: absolute;
-    border-radius: 100%;
-    pointer-events: none;
-    transform: translateX(var(--translate, var(--size)))  scale(0.75);
-    transition: 0.25s;
+	content: "";
+	width: var(--size);
+	height: var(--size);
+	background: var(--fg);
+	position: absolute;
+	border-radius: 100%;
+	pointer-events: none;
+	transform: translateX(var(--translate, var(--size)))  scale(0.75);
+	transition: 0.25s;
 }
 
 .rule input {
-    display: none !important;
+	display: none !important;
 }
 
 .rule label {
-    width: var(--size);
+	width: var(--size);
 }
 
 .rule label:hover {
-    background: #ffffff77;
+	background: #ffffff77;
 }
 
 .rule:has(input[value="off"]:checked) {
-    background: var(--off-bg);
-    --fg: var(--off-fg);
+	background: var(--off-bg);
+	--fg: var(--off-fg);
 }
 
 .rule:has(input[value="off"]:checked)::after {
-    --translate: 0;
+	--translate: 0;
 }
 
 .rule:has(input[value="na"]:checked) {
-    background: transparent;
-    opacity: 0.5;
+	background: transparent;
+	opacity: 0.5;
 }
 
 .rule:has(input[value="na"]:checked)::after {
-    --translate: var(--size);
+	--translate: var(--size);
 }
 
 .rule:has(input[value="on"]:checked) {
-    background: var(--on-bg);
-    --fg: var(--on-fg);
+	background: var(--on-bg);
+	--fg: var(--on-fg);
 }
 
 .rule:has(input[value="on"]:checked)::after {
-    --translate: calc(2 * var(--size));
+	--translate: calc(2 * var(--size));
 }
 
 body:not(:has(#show-passwords:checked)) .password {
-    -webkit-text-security: disc;
+	-webkit-text-security: disc;
 }
 
 .table div:has(details) {
-    width: 100%;
+	width: 100%;
 }
 
 .table details {
-    margin: 0;
-    width: 100%;
+	margin: 0;
+	width: 100%;
 }
 
 .table details summary {
-    user-select: none;
+	user-select: none;
 }
 
 html {
-    scroll-behavior: smooth;
+	scroll-behavior: smooth;
 }
 
 select[multiple] {
-    min-width: 8em;
-    height: max-content;
-    padding: 0;
+	min-width: 8em;
+	height: max-content;
+	padding: 0;
 }
 
 select[multiple] option {
-    border: none;
+	border: none;
 }
 
 select[multiple] option:checked {
-    background: var(--ok-fg) !important;
-    color: var(--ok-bg);
+	background: var(--ok-fg) !important;
+	color: var(--ok-bg);
 }
 
 details.inline {
-    width: max-content;
-    margin: 0;
-    padding: 0;
-    background: none;
-    border: none;
+	width: max-content;
+	margin: 0;
+	padding: 0;
+	background: none;
+	border: none;
 }
 
 details.inline > :not(summary) {
-    position: absolute;
+	position: absolute;
 }
 
 :is(.rows > *, .row) > * {
-    margin: 0 !important;
+	margin: 0 !important;
 }
 
 form * {
-    vertical-align: middle !important;
+	vertical-align: middle !important;
 }
 
 .table {
-    border-spacing: var(--gap);
-    margin: calc(-1 * var(--gap));
+	border-spacing: var(--gap);
+	margin: calc(-1 * var(--gap));
 }
 
 body.shift .iconbutton.bad:hover {
-    --accent: red;
+	--accent: red;
 }

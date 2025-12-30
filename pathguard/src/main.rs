@@ -111,123 +111,123 @@ async fn main() -> std::io::Result<()> {
 		new
 	};
 	HttpServer::new(move || {
-        let app = App::new()
-            .wrap(middleware::Logger::default())
-            .wrap(middleware::DefaultHeaders::new().add((CONTENT_TYPE, TEXT_HTML_UTF_8)))
-            .wrap({
-                #[allow(unused_mut)]
-                let mut builder = SessionMiddleware::builder(CookieSessionStore::default(), key.clone())
-                    .cookie_name("pathguard_id".to_owned());
-                #[cfg(debug_assertions)]
-                {
-                    builder = builder.cookie_secure(false);
-                }
-                builder.build()
-            })
-            .wrap(HtmxMiddleware)
-            .service(web::resource(&*ARGS.dashboard).get(dashboard))
-            .service(web::resource(ARGS.dashboard.to_string() + ACTIVITY_ROUTE)
-                .get(dashboard_activity))
-            .service(web::resource(ARGS.dashboard.to_string() + LOGIN_ROUTE)
-                .post(post_login))
-            .service(web::resource(ARGS.dashboard.to_string() + LOGOUT_ROUTE)
-                .get(logout))
-            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE)
-                .get(get_groups)
-                .post(post_group))
-            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}")
-                .post(post_rule)
-                .delete(delete_group))
-            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/up")
-                .post(post_group_up))
-            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/down")
-                .post(post_group_down))
-            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/rules/{rule}")
-                .patch(patch_rule)
-                .delete(delete_rule))
-            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/rules/{rule}/up")
-                .post(post_rule_up))
-            .service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/rules/{rule}/down")
-                .post(post_rule_down))
-            .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE)
-                .post(post_user))
-            .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}")
-                .get(get_user)
-                .patch(patch_user)
-                .delete(delete_user))
-            .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}/edit")
-                .get(get_user_edit))
-            .service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}/groups")
-                .get(get_user_groups))
-            .service(web::resource(ARGS.dashboard.to_string() + "/{tail:.*}").get(async ||
-                HttpResponse::NotFound().body(page(html! {
-                    h1 { "404 Not Found" }
-                    p { "Couldn't find that page. Would you like to return to the " a href=(ARGS.dashboard) { "dashboard" } "?" }
-                }))
-            ))
-            .service(web::resource(HTMX).get(async || {
-                let mut res = HttpResponse::Ok().body({
-                    #[cfg(debug_assertions)]
-                    {
-                        include_str!("htmx.js")
-                    }
-                    #[cfg(not(debug_assertions))]
-                    {
-                        include_str!("htmx.min.js")
-                    }
-                });
-                res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("application/javascript").unwrap());
-                res
-            }))
-            .service(web::resource(SCRIPT).get(async || {
-                let mut res = HttpResponse::Ok().body({
-                    #[cfg(debug_assertions)]
-                    {
-                        include_str!("script.js")
-                    }
-                    #[cfg(not(debug_assertions))]
-                    {
-                        // minify_js_file! proc macro doesn't trigger recompiles on file change
-                        include_str!("script.js");
-                        static_web_minify::minify_js_file!("pathguard/src/script.js")
-                    }
-                });
-                res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("application/javascript").unwrap());
-                res
-            }))
-            .service(web::resource(MISSING_CSS).get(async || {
-                let mut res = HttpResponse::Ok().body(include_str!("missing.css"));
-                res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("text/css").unwrap());
-                res
-            }))
-            .service(web::resource(OVERRIDE_CSS).get(async || {
-                let mut res = HttpResponse::Ok().body({
-                    #[cfg(debug_assertions)]
-                    {
-                        include_str!("override.css")
-                    }
-                    #[cfg(not(debug_assertions))]
-                    {
-                        // minify! proc macro doesn't trigger recompiles on file change
-                        include_str!("override.css");
-                        const_css_minify::minify!("pathguard/src/override.css")
-                    }
-                });
-                res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("text/css").unwrap());
-                res
-            }));
-        match &ARGS.mode {
-            Mode::Proxy(ProxyMode { port }) => app.default_service(
-                web::to(async |auth: Fancy<Authorized>, req: HttpRequest, bytes: web::Bytes| proxy::proxy(auth, req, bytes, *port).await)
-            ),
-            Mode::Files(FilesMode { root }) => app.default_service(
-                web::to(async |auth: Fancy<Unauthorized>, req: HttpRequest, htmx: Htmx| files::files(auth, req, htmx, root).await)
-            ),
-        }
-    })
-        .disable_signals()
-        .bind(("127.0.0.1", ARGS.port))?
-        .run()
-        .await?;
+		let app = App::new()
+			.wrap(middleware::Logger::default())
+			.wrap(middleware::DefaultHeaders::new().add((CONTENT_TYPE, TEXT_HTML_UTF_8)))
+			.wrap({
+				#[allow(unused_mut)]
+				let mut builder = SessionMiddleware::builder(CookieSessionStore::default(), key.clone())
+					.cookie_name("pathguard_id".to_owned());
+				#[cfg(debug_assertions)]
+				{
+					builder = builder.cookie_secure(false);
+				}
+				builder.build()
+			})
+			.wrap(HtmxMiddleware)
+			.service(web::resource(&*ARGS.dashboard).get(dashboard))
+			.service(web::resource(ARGS.dashboard.to_string() + ACTIVITY_ROUTE)
+				.get(dashboard_activity))
+			.service(web::resource(ARGS.dashboard.to_string() + LOGIN_ROUTE)
+				.post(post_login))
+			.service(web::resource(ARGS.dashboard.to_string() + LOGOUT_ROUTE)
+				.get(logout))
+			.service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE)
+				.get(get_groups)
+				.post(post_group))
+			.service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}")
+				.post(post_rule)
+				.delete(delete_group))
+			.service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/up")
+				.post(post_group_up))
+			.service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/down")
+				.post(post_group_down))
+			.service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/rules/{rule}")
+				.patch(patch_rule)
+				.delete(delete_rule))
+			.service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/rules/{rule}/up")
+				.post(post_rule_up))
+			.service(web::resource(ARGS.dashboard.to_string() + GROUPS_ROUTE + "/{group}/rules/{rule}/down")
+				.post(post_rule_down))
+			.service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE)
+				.post(post_user))
+			.service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}")
+				.get(get_user)
+				.patch(patch_user)
+				.delete(delete_user))
+			.service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}/edit")
+				.get(get_user_edit))
+			.service(web::resource(ARGS.dashboard.to_string() + USERS_ROUTE + "/{user}/groups")
+				.get(get_user_groups))
+			.service(web::resource(ARGS.dashboard.to_string() + "/{tail:.*}").get(async ||
+				HttpResponse::NotFound().body(page(html! {
+					h1 { "404 Not Found" }
+					p { "Couldn't find that page. Would you like to return to the " a href=(ARGS.dashboard) { "dashboard" } "?" }
+				}))
+			))
+			.service(web::resource(HTMX).get(async || {
+				let mut res = HttpResponse::Ok().body({
+					#[cfg(debug_assertions)]
+					{
+						include_str!("htmx.js")
+					}
+					#[cfg(not(debug_assertions))]
+					{
+						include_str!("htmx.min.js")
+					}
+				});
+				res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("application/javascript").unwrap());
+				res
+			}))
+			.service(web::resource(SCRIPT).get(async || {
+				let mut res = HttpResponse::Ok().body({
+					#[cfg(debug_assertions)]
+					{
+						include_str!("script.js")
+					}
+					#[cfg(not(debug_assertions))]
+					{
+						// minify_js_file! proc macro doesn't trigger recompiles on file change
+						include_str!("script.js");
+						static_web_minify::minify_js_file!("pathguard/src/script.js")
+					}
+				});
+				res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("application/javascript").unwrap());
+				res
+			}))
+			.service(web::resource(MISSING_CSS).get(async || {
+				let mut res = HttpResponse::Ok().body(include_str!("missing.css"));
+				res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("text/css").unwrap());
+				res
+			}))
+			.service(web::resource(OVERRIDE_CSS).get(async || {
+				let mut res = HttpResponse::Ok().body({
+					#[cfg(debug_assertions)]
+					{
+						include_str!("override.css")
+					}
+					#[cfg(not(debug_assertions))]
+					{
+						// minify! proc macro doesn't trigger recompiles on file change
+						include_str!("override.css");
+						const_css_minify::minify!("pathguard/src/override.css")
+					}
+				});
+				res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("text/css").unwrap());
+				res
+			}));
+		match &ARGS.mode {
+			Mode::Proxy(ProxyMode { port }) => app.default_service(
+				web::to(async |auth: Fancy<Authorized>, req: HttpRequest, bytes: web::Bytes| proxy::proxy(auth, req, bytes, *port).await)
+			),
+			Mode::Files(FilesMode { root }) => app.default_service(
+				web::to(async |auth: Fancy<Unauthorized>, req: HttpRequest, htmx: Htmx| files::files(auth, req, htmx, root).await)
+			),
+		}
+	})
+		.disable_signals()
+		.bind(("127.0.0.1", ARGS.port))?
+		.run()
+		.await?;
 	Ok(())
 }

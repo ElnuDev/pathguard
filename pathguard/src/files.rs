@@ -256,81 +256,81 @@ pub async fn files(
 			}
 
 			HttpResponse::Ok().body(page(html! {
-                svg xmlns="http://www.w3.org/2000/svg" style="display: none" {
-                    symbol #(HOME_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
-                        (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />"#))
-                    }
-                    symbol #(DOCUMENT_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
-                        (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />"#))
-                    }
-                    symbol #(FOLDER_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
-                        (PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" />"#))
-                    }
+				svg xmlns="http://www.w3.org/2000/svg" style="display: none" {
+					symbol #(HOME_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+						(PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />"#))
+					}
+					symbol #(DOCUMENT_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+						(PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />"#))
+					}
+					symbol #(FOLDER_) fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" {
+						(PreEscaped(r#"<path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" />"#))
+					}
 
-                }
-                @if req.path() != "/" {
-                    nav.breadcrumbs aria-label="Breadcrumbs" {
-                        ol.margin-start:0 {
-                            @let mut path = root.to_owned();
-                            li {
-                                a.warn
-                                    hx-boost=[boosted_dir(true, &path)?]
-                                    href="/"
-                                { (const_icon!(HOME)) " Home" }
-                            }
-                            @let mut link = String::new();
-                            @let comps: Vec<&str> = decoded_path.split("/").skip(1).collect();
-                            @for comp in comps.iter().rev().skip(2).rev() {
-                                li {
-                                    @let _ = { path.push(comp); };
-                                    a.warn
-                                        hx-boost=[boosted_dir(true, &path)?]
-                                        href={ ({ link.push('/'); link.push_str(comp); &link }) "/" }
-                                    {
-                                        (const_icon!(FOLDER)) " " (comp)
-                                    }
-                                }
-                            }
-                            li {
-                                u { (const_icon!(FOLDER)) " " (comps[comps.len() - 2]) }
-                            }
-                        }
-                    }
-                } @else { u { (const_icon!(HOME)) " Home" } }
-                ul.list-of-links.mono-font style="list-style-type: none" {
-                    @if req.path() != "/" {
-                        li {
-                            a href=".." { ".." }
-                        }
-                    } @else { br; }
-                    @if entries.is_empty() {
-                        em { "Empty" }
-                    } @else {
-                        @for (path, metadata, name) in entries.iter() {
-                            li {
-                                @let is_dir = metadata.is_dir();
-                                a.warn[is_dir]
-                                    hx-boost=[boosted_dir(is_dir, &path)?]
-                                    href={ (name) @if is_dir { "/" } }
-                                    target=[(!is_dir).then_some("_blank")]
-                                {
-                                    (if is_dir {
-                                        const_icon!(FOLDER)
-                                    } else {
-                                        const_icon!(DOCUMENT)
-                                    })
-                                    " "
-                                    (name)
-                                }
-                                span.float:right { ({
-                                    let modified: DateTime<Utc> = metadata.modified()?.into();
-                                    modified.with_nanosecond(0).unwrap()
-                                }) }
-                            }
-                        }
-                    }
-                }
-            }))
+				}
+				@if req.path() != "/" {
+					nav.breadcrumbs aria-label="Breadcrumbs" {
+						ol.margin-start:0 {
+							@let mut path = root.to_owned();
+							li {
+								a.warn
+									hx-boost=[boosted_dir(true, &path)?]
+									href="/"
+								{ (const_icon!(HOME)) " Home" }
+							}
+							@let mut link = String::new();
+							@let comps: Vec<&str> = decoded_path.split("/").skip(1).collect();
+							@for comp in comps.iter().rev().skip(2).rev() {
+								li {
+									@let _ = { path.push(comp); };
+									a.warn
+										hx-boost=[boosted_dir(true, &path)?]
+										href={ ({ link.push('/'); link.push_str(comp); &link }) "/" }
+									{
+										(const_icon!(FOLDER)) " " (comp)
+									}
+								}
+							}
+							li {
+								u { (const_icon!(FOLDER)) " " (comps[comps.len() - 2]) }
+							}
+						}
+					}
+				} @else { u { (const_icon!(HOME)) " Home" } }
+				ul.list-of-links.mono-font style="list-style-type: none" {
+					@if req.path() != "/" {
+						li {
+							a href=".." { ".." }
+						}
+					} @else { br; }
+					@if entries.is_empty() {
+						em { "Empty" }
+					} @else {
+						@for (path, metadata, name) in entries.iter() {
+							li {
+								@let is_dir = metadata.is_dir();
+								a.warn[is_dir]
+									hx-boost=[boosted_dir(is_dir, &path)?]
+									href={ (name) @if is_dir { "/" } }
+									target=[(!is_dir).then_some("_blank")]
+								{
+									(if is_dir {
+										const_icon!(FOLDER)
+									} else {
+										const_icon!(DOCUMENT)
+									})
+									" "
+									(name)
+								}
+								span.float:right { ({
+									let modified: DateTime<Utc> = metadata.modified()?.into();
+									modified.with_nanosecond(0).unwrap()
+								}) }
+							}
+						}
+					}
+				}
+			}))
 		}
 	})
 }

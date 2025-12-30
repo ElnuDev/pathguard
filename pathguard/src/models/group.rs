@@ -57,8 +57,8 @@ impl Render for Rule {
 					(icon_button(
 						CHEVRON_DOWN,
 						&format!("hx-post=\"{dashboard}/groups/{group}/rules/{path_encoded}/down\" \
-                            hx-swap=\"none\"
-                            hx-on::after-swap=\"swapDown(this.parentElement.parentElement)\""),
+							hx-swap=\"none\"
+							hx-on::after-swap=\"swapDown(this.parentElement.parentElement)\""),
 						None
 					))
 				}
