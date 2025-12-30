@@ -1,4 +1,3 @@
-#![feature(rwlock_downgrade)]
 #![feature(impl_trait_in_assoc_type)]
 
 mod auth;
