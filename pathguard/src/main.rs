@@ -209,7 +209,7 @@ async fn main() -> std::io::Result<()> {
 					{
 						// minify! proc macro doesn't trigger recompiles on file change
 						include_str!("override.css");
-						const_css_minify::minify!("pathguard/src/override.css")
+						const_css_minify::minify!("override.css")
 					}
 				});
 				res.headers_mut().append(CONTENT_TYPE, HeaderValue::from_str("text/css").unwrap());
