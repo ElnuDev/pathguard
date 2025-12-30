@@ -381,9 +381,20 @@ pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpRe
 		}
 		h2 #users { "Users" }
 		p { label style="user-select: none" { "Show passwords? " input #show-passwords type="checkbox" autocomplete="off"; } }
+		@let users: Vec<UserWithGroups> = DATABASE.users()?
+			.into_iter()
+			.map(|user| -> Result<UserWithGroups, _> { user.try_into() })
+			.collect::<Result<Vec<UserWithGroups>, database::DatabaseError>>()?;
+		details {
+			summary { "Raw user logins" }
+			.mono-font {
+				@for user in &users {
+					(user.name) (" ") span.password { (user.password) } br;
+				}
+			}
+		}
 		.table.rows {
-			@for user in DATABASE.users()? {
-				@let user: UserWithGroups = user.try_into()?;
+			@for user in &users {
 				(user.display(UserRenderContext {
 					mode: UserDisplayMode::Normal,
 					last_active: user.last_active()?,

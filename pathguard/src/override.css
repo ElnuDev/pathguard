@@ -138,3 +138,12 @@ form * {
 body.shift .iconbutton.bad:hover {
 	--accent: red;
 }
+
+.password {
+	/*
+		Fix for weird bug in Firefox where if something has -webkit-text-security
+		set and is inline (e.g. a <span>), all other sibling inline elements get the
+		same -webkit-text-security setting. Very weird.
+	*/
+	display: inline-block;
+}
