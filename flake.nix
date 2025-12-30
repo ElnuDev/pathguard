@@ -25,7 +25,7 @@ Some utility commands:
         src = ./.;
         #nativeBuildInputs = [ pkg-config ];
         #buildInputs = [ openssl ];
-        cargoHash = "sha256-RYCUY9zXY4BtR8Mlp9ioeO4ttTLSfg/XDLGDO3JtDRE=";
+        cargoHash = "sha256-TjCWQtS0xh0STfi+kYhNMPRegwAtguD0wj7+TZCQPuM=";
       };
       meta = with nixpkgs.lib; {
         homepage = "https://github.com/ElnuDev/pathguard";
