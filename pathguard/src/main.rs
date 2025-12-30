@@ -6,8 +6,8 @@ mod dashboard;
 mod files;
 mod models;
 mod proxy;
-mod templates;
 mod robots_txt;
+mod templates;
 
 mod database;
 mod schema;
@@ -17,11 +17,11 @@ use std::{env, fs, path::PathBuf};
 use actix_htmx::{Htmx, HtmxMiddleware};
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
 use actix_web::{
-    cookie::Key,
-    http::header::{HeaderValue, CONTENT_TYPE},
-    middleware::{self},
-    mime::TEXT_HTML_UTF_8,
-    web, App, HttpRequest, HttpResponse, HttpServer,
+	cookie::Key,
+	http::header::{HeaderValue, CONTENT_TYPE},
+	middleware::{self},
+	mime::TEXT_HTML_UTF_8,
+	web, App, HttpRequest, HttpResponse, HttpServer,
 };
 use maud::html;
 
@@ -29,61 +29,61 @@ use clap::{Parser, Subcommand};
 use passwords::PasswordGenerator;
 
 use crate::{
-    auth::{Authorized, Fancy, Unauthorized},
-    dashboard::*,
-    database::Database,
-    templates::page,
+	auth::{Authorized, Fancy, Unauthorized},
+	dashboard::*,
+	database::Database,
+	templates::page,
 };
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Mode {
-    Proxy(ProxyMode),
-    Files(FilesMode),
+	Proxy(ProxyMode),
+	Files(FilesMode),
 }
 
 #[derive(Parser, Debug, Clone)]
 pub struct ProxyMode {
-    port: u16,
+	port: u16,
 }
 
 #[derive(Parser, Debug, Clone)]
 pub struct FilesMode {
-    root: PathBuf,
+	root: PathBuf,
 }
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version)]
 pub struct Args {
-    #[arg(long = "db", default_value = "database.db")]
-    pub database: Box<str>,
-    #[arg(short, long, default_value = "session.key")]
-    pub key: Box<str>,
-    #[arg(short, long, default_value_t = 8000)]
-    pub port: u16,
-    #[arg(short, long, default_value = "/pathguard")]
-    pub dashboard: Box<str>,
-    #[arg(short, long, default_value_t = 60.0)]
-    pub min_password_strength: f64,
-    #[command(subcommand)]
-    pub mode: Mode,
+	#[arg(long = "db", default_value = "database.db")]
+	pub database: Box<str>,
+	#[arg(short, long, default_value = "session.key")]
+	pub key: Box<str>,
+	#[arg(short, long, default_value_t = 8000)]
+	pub port: u16,
+	#[arg(short, long, default_value = "/pathguard")]
+	pub dashboard: Box<str>,
+	#[arg(short, long, default_value_t = 60.0)]
+	pub min_password_strength: f64,
+	#[command(subcommand)]
+	pub mode: Mode,
 }
 
 pub const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
-    length: 10,
-    ..PasswordGenerator::new()
+	length: 10,
+	..PasswordGenerator::new()
 };
 
 lazy_static::lazy_static! {
-    static ref ARGS: Args = {
-        let mut args = Args::parse();
-        if let Mode::Files(FilesMode { root }) = &mut args.mode {
-            // Ugly paths like . or .. can cause issues when checking for
-            // FilesError::OutOfScope
-            *root = root.canonicalize().unwrap();
-        }
-        args
-    };
-    pub static ref DATABASE: Database = Database::new(&ARGS.database).unwrap();
+	static ref ARGS: Args = {
+		let mut args = Args::parse();
+		if let Mode::Files(FilesMode { root }) = &mut args.mode {
+			// Ugly paths like . or .. can cause issues when checking for
+			// FilesError::OutOfScope
+			*root = root.canonicalize().unwrap();
+		}
+		args
+	};
+	pub static ref DATABASE: Database = Database::new(&ARGS.database).unwrap();
 }
 
 pub const LOGIN_ROUTE: &str = "/login";
@@ -99,18 +99,18 @@ pub const OVERRIDE_CSS: &str = "/pathguard_override.css";
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    unsafe { env::set_var("RUST_LOG", "actix_web=debug,pathguard") };
-    env_logger::init();
-    // If we construct this inside of HttpServer::new
-    // then it will instantiate multiple times leading to state divergence
-    let key = if fs::exists(&*ARGS.key)? {
-        Key::from(&fs::read(&*ARGS.key)?)
-    } else {
-        let new = Key::generate();
-        fs::write(&*ARGS.key, new.master())?;
-        new
-    };
-    HttpServer::new(move || {
+	unsafe { env::set_var("RUST_LOG", "actix_web=debug,pathguard") };
+	env_logger::init();
+	// If we construct this inside of HttpServer::new
+	// then it will instantiate multiple times leading to state divergence
+	let key = if fs::exists(&*ARGS.key)? {
+		Key::from(&fs::read(&*ARGS.key)?)
+	} else {
+		let new = Key::generate();
+		fs::write(&*ARGS.key, new.master())?;
+		new
+	};
+	HttpServer::new(move || {
         let app = App::new()
             .wrap(middleware::Logger::default())
             .wrap(middleware::DefaultHeaders::new().add((CONTENT_TYPE, TEXT_HTML_UTF_8)))
@@ -229,5 +229,5 @@ async fn main() -> std::io::Result<()> {
         .bind(("127.0.0.1", ARGS.port))?
         .run()
         .await?;
-    Ok(())
+	Ok(())
 }
