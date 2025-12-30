@@ -201,7 +201,7 @@ impl UserWithGroups {
 						@if name != ADMIN_USERNAME {
 							div {
 								dt { "Groups:" }
-								dd { (groups_select(groups, Some(self))) }
+								dd { (groups_select(groups, Some(&self.groups))) }
 							}
 						}
 					}

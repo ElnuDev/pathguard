@@ -400,12 +400,12 @@ pub async fn dashboard(_auth: Fancy<AuthorizedAdmin>) -> database::Result<HttpRe
 					last_active: user.last_active()?,
 				}))
 			}
-			(new_user_form(false, &groups))
+			(new_user_form(false, &groups, None))
 		}
 	})))
 }
 
-fn new_user_form(autofocus: bool, groups: &Vec<Group>) -> Markup {
+fn new_user_form(autofocus: bool, groups: &Vec<Group>, chosen: Option<&Vec<String>>) -> Markup {
 	html! {
 		form
 			autocomplete="off"
@@ -423,7 +423,7 @@ fn new_user_form(autofocus: bool, groups: &Vec<Group>) -> Markup {
 					div {
 						details.inline {
 							summary { "Groups" }
-							(groups_select(groups, None))
+							(groups_select(groups, chosen))
 						}
 					}
 				}
@@ -448,15 +448,15 @@ pub async fn get_user_groups(
 	Ok(HttpResponse::Ok().body(user.display_groups()))
 }
 
-pub fn groups_select(groups: &Vec<Group>, user: Option<&UserWithGroups>) -> Markup {
+pub fn groups_select(groups: &Vec<Group>, chosen: Option<&Vec<String>>) -> Markup {
 	html! {
 		select hx-trigger="groups from:body" hx-get={ (ARGS.dashboard) (GROUPS_ROUTE) } name="groups" multiple {
 			@for group in groups {
 				@if group.name != DEFAULT_GROUP {
 					option
 						value=(group.name)
-						selected[user
-							.map(|user| user.groups.contains(&group.name))
+						selected[chosen
+							.map(|chosen| chosen.contains(&group.name))
 							.unwrap_or_default()]
 					{ (group.name) }
 				}
@@ -599,7 +599,7 @@ pub async fn post_user(
 				mode: UserDisplayMode::Normal,
 				last_active: None,
 			}))
-			(new_user_form(true, &DATABASE.groups()?))
+			(new_user_form(true, &DATABASE.groups()?, Some(&user.groups)))
 		})
 	} else {
 		res.finish()
