@@ -11,9 +11,7 @@ use diesel::{dsl::insert_into, prelude::*, r2d2::ConnectionManager};
 use maud::{html, Markup, Render};
 use r2d2::PooledConnection;
 use std::{
-    fmt::Debug,
-    future::{ready, Ready},
-    ops::{Deref, DerefMut},
+    borrow::Cow, fmt::Debug, future::{Ready, ready}, ops::{Deref, DerefMut}
 };
 use thiserror::Error;
 
@@ -179,6 +177,8 @@ pub fn user_rules(
 }
 
 pub fn user_rules_allowed(rules: &[Rule], path: &str) -> bool {
+    let path = urlencoding::decode(path)
+        .unwrap_or(Cow::Borrowed(path));
     rules
         .iter()
         .filter_map(|rule| {
