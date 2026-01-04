@@ -612,7 +612,7 @@ pub fn get_user_generic(
 	async move |_auth: AuthorizedAdmin, path: web::Path<String>| -> database::Result<HttpResponse> {
 		let username = path.into_inner();
 		let Some(user) = DATABASE.user(&username)? else {
-			return Ok(ErrorNotFound("That user doesn't exist").error_response());
+			return Ok(ErrorNotFound("that user doesn't exist").error_response());
 		};
 		let user: UserWithGroups = user.try_into()?;
 		let global_groups = if edit { Some(DATABASE.groups()?) } else { None };
@@ -726,6 +726,7 @@ pub async fn patch_user(
 pub async fn delete_user(
 	_auth: AuthorizedAdmin,
 	path: web::Path<String>,
+	htmx: Htmx,
 ) -> database::Result<HttpResponse> {
 	let name = path.into_inner();
 	Ok(
@@ -739,8 +740,10 @@ pub async fn delete_user(
 		})? == 0
 		{
 			ErrorNotFound("that user doesn't exist").error_response()
-		} else {
+		} else if htmx.is_htmx {
 			HttpResponse::Ok().finish()
+		} else {
+			HttpResponse::NoContent().finish()
 		},
 	)
 }
@@ -789,10 +792,10 @@ pub async fn post_rule(
 pub async fn delete_rule(
 	_auth: AuthorizedAdmin,
 	path: web::Path<(String, String)>,
+	htmx: Htmx,
 ) -> database::Result<HttpResponse> {
 	let (group, path) = path.into_inner();
-	let path = urlencoding::decode(&path).unwrap_or(Cow::Borrowed(&path));
-	DATABASE.run(|conn| {
+	Ok(if DATABASE.run(|conn| {
 		use crate::schema::rules::dsl;
 		delete(
 			dsl::rules
@@ -800,8 +803,13 @@ pub async fn delete_rule(
 				.filter(dsl::path.eq(&path)),
 		)
 		.execute(conn)
-	})?;
-	Ok(HttpResponse::Ok().finish())
+	})? == 0 {
+		ErrorNotFound("that rule doesn't exist").error_response()
+	} else if htmx.is_htmx {
+		HttpResponse::Ok().finish()
+	} else {
+		HttpResponse::NoContent().finish()
+	})
 }
 
 #[derive(Deserialize)]
@@ -911,10 +919,12 @@ pub async fn delete_group(
 	{
 		return Ok(ErrorNotFound("that group doesn't exist").error_response());
 	}
-	if htmx.is_htmx {
+	Ok(if htmx.is_htmx {
 		refetch_groups_deleted(&htmx);
-	}
-	Ok(HttpResponse::Ok().finish())
+		HttpResponse::Ok().finish()
+	} else {
+		HttpResponse::NoContent().finish()
+	})
 }
 
 pub async fn post_group_up(

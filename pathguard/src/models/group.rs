@@ -112,7 +112,7 @@ impl Group {
 	}
 
 	fn display_with_rules(&self, rules: &Vec<Rule>) -> Markup {
-		let name = &self.name;
+		let name = urlencoding::encode(&self.name);
 		html! {
 			div {
 				div style=[(name != DEFAULT_GROUP).then_some("border-left: 2px solid var(--graphical-fg); padding-left: 1em")] {
