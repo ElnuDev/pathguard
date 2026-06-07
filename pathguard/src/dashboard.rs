@@ -102,6 +102,21 @@ where
 	Ok((!s.is_empty()).then_some(s))
 }
 
+/// Escapes the SQL LIKE wildcard characters (`%`, `_`) and the escape
+/// character itself (`\`) so that a user-supplied substring becomes a
+/// literal match pattern. Must be paired with an `.escape('\\')` call
+/// on the LIKE expression so SQLite honours the escape.
+fn escape_like(s: &str) -> String {
+	let mut out = String::with_capacity(s.len());
+	for c in s.chars() {
+		if matches!(c, '%' | '_' | '\\') {
+			out.push('\\');
+		}
+		out.push(c);
+	}
+	out
+}
+
 fn default_page() -> i64 {
 	1
 }
@@ -143,10 +158,18 @@ pub async fn dashboard_activity(
 		let filtered = || {
 			let mut query = dsl::activities.into_boxed();
 			if let Some(search) = &user_search {
-				query = query.filter(dsl::user.like(format!("%{search}%")))
+				query = query.filter(
+					dsl::user
+						.like(format!("%{}%", escape_like(search)))
+						.escape('\\'),
+				)
 			}
 			if let Some(search) = &path_search {
-				query = query.filter(dsl::path.like(format!("%{search}%")))
+				query = query.filter(
+					dsl::path
+						.like(format!("%{}%", escape_like(search)))
+						.escape('\\'),
+				)
 			}
 			if ignore_blocked {
 				query = query.filter(dsl::allowed.eq(true));
