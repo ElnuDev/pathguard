@@ -109,6 +109,11 @@ async fn main() -> std::io::Result<()> {
 	} else {
 		let new = Key::generate();
 		fs::write(&*ARGS.key, new.master())?;
+		#[cfg(unix)]
+		{
+			use std::os::unix::fs::PermissionsExt;
+			fs::set_permissions(&*ARGS.key, fs::Permissions::from_mode(0o600))?;
+		}
 		new
 	};
 	HttpServer::new(move || {
