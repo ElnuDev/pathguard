@@ -102,6 +102,34 @@ Some utility commands:
             type = lib.types.int;
             default = 60;
           };
+          trustForwardedFor = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = lib.mdDoc ''
+              Trust the `Forwarded` / `X-Forwarded-For` request headers
+              when recording the activity log's client IP.
+
+              Only enable this when pathguard is deployed behind a
+              reverse proxy that you control **and** that strips any
+              client-supplied `Forwarded` / `X-Forwarded-For` headers
+              before they reach pathguard. A typical fit is a
+              Cloudflare tunnel (where `CF-Connecting-IP` is set by
+              Cloudflare and the raw `X-Forwarded-For` chain reflects
+              Cloudflare's own rewrite of the client address) or an
+              nginx `proxy_pass` block that explicitly resets the
+              header.
+
+              If pathguard is exposed directly to the internet, or
+              sits behind a proxy that forwards client-supplied
+              `X-Forwarded-For` values verbatim, leaving this `false`
+              ensures the audit log records the real socket peer
+              address. Setting it to `true` in that environment lets
+              any anonymous caller forge the IP attributed to their
+              requests in the log.
+
+              Default `false`.
+            '';
+          };
         };
         config.systemd.services.pathguard = let
           cfg = config.services.pathguard;
@@ -118,7 +146,8 @@ Some utility commands:
                 "--key /var/lib/pathguard/session.key " +
                 "--port ${builtins.toString cfg.port} " +
                 "--dashboard ${cfg.dashboard} " +
-                "--min-password-strength ${builtins.toString cfg.minPasswordStrength}";
+                "--min-password-strength ${builtins.toString cfg.minPasswordStrength}" +
+                (lib.optionalString cfg.trustForwardedFor " --trust-forwarded-for");
               mode =
                 if cfg.mode.kind == "proxy" then
                   "proxy ${builtins.toString cfg.mode.port}"

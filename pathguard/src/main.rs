@@ -63,6 +63,14 @@ pub struct Args {
 	pub dashboard: Box<str>,
 	#[arg(short, long, default_value_t = 60.0)]
 	pub min_password_strength: f64,
+	/// Trust the Forwarded / X-Forwarded-For request headers when
+	/// recording the activity log's client IP. Only enable this when
+	/// pathguard is deployed behind a reverse proxy that you control
+	/// AND that strips any client-supplied Forwarded headers before
+	/// they reach pathguard. Otherwise an attacker can spoof the
+	/// IP recorded in the audit log.
+	#[arg(long, default_value_t = false)]
+	pub trust_forwarded_for: bool,
 	#[command(subcommand)]
 	pub mode: Mode,
 }
