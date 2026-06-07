@@ -1205,6 +1205,21 @@ impl Deref for LoginReturnUri {
 	}
 }
 
+/// Returns the input only if it is a same-origin relative path. Any
+/// scheme-relative ("//evil.example/"), absolute-URL ("https://..."),
+/// or backslash-prefixed ("/\\evil.example/" -- some browsers normalize
+/// backslashes to forward slashes) value is rejected and replaced with
+/// "/". This prevents the login flow from being used as an open-redirect
+/// primitive for phishing.
+pub fn safe_redirect(uri: &str) -> &str {
+	let bytes = uri.as_bytes();
+	match bytes {
+		[b'/', b'/', ..] | [b'/', b'\\', ..] => "/",
+		[b'/', ..] => uri,
+		_ => "/",
+	}
+}
+
 impl FromRequest for LoginReturnUri {
 	type Error = Infallible;
 
@@ -1220,18 +1235,17 @@ impl FromRequest for LoginReturnUri {
 			let qstring = qstring::QString::from(req.query_string());
 			qstring.get(QUERY_REDIRECT).map(|str| str.to_owned())
 		}
-		std::future::ready(Ok(Self(
-			if req.headers().contains_key("hx-request") {
-				from_headers(req)
-					.map(|uri| Some(Cow::Borrowed(uri)))
-					.unwrap_or_else(|| from_query(req).map(Cow::Owned))
-			} else {
-				from_query(req)
-					.map(|uri| Some(Cow::Owned(uri)))
-					.unwrap_or_else(|| from_headers(req).map(Cow::Borrowed))
-			}
-			.unwrap_or(Cow::Borrowed("/"))
-			.into_owned(),
-		)))
+		let raw = if req.headers().contains_key("hx-request") {
+			from_headers(req)
+				.map(|uri| Some(Cow::Borrowed(uri)))
+				.unwrap_or_else(|| from_query(req).map(Cow::Owned))
+		} else {
+			from_query(req)
+				.map(|uri| Some(Cow::Owned(uri)))
+				.unwrap_or_else(|| from_headers(req).map(Cow::Borrowed))
+		}
+		.unwrap_or(Cow::Borrowed("/"))
+		.into_owned();
+		std::future::ready(Ok(Self(safe_redirect(&raw).to_owned())))
 	}
 }
