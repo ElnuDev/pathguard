@@ -1130,12 +1130,13 @@ pub fn login_form(invalid: bool, return_uri: &str) -> Markup {
 const QUERY_REDIRECT: &str = "r";
 
 pub async fn logout(req: HttpRequest, htmx: Htmx, session: Session) -> HttpResponse {
-	let redirect = req
-		.headers()
-		.get(REFERER)
-		.and_then(|header| header.to_str().ok())
-		.unwrap_or(&ARGS.dashboard)
-		.to_owned();
+	// Browsers send Referer as an absolute URL ("https://host/path"), which
+	// is an open-redirect primitive if echoed straight back into Location.
+	// Rather than parse the Referer's authority to confirm it matches our
+	// own (which would require trusting Host or X-Forwarded-Host), just
+	// drop the Referer entirely and send users to the dashboard, which
+	// renders the login form for unauthenticated callers.
+	let redirect = ARGS.dashboard.to_string();
 	session.purge();
 	if htmx.is_htmx {
 		htmx.redirect(redirect);
