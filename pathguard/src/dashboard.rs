@@ -1,4 +1,13 @@
-use std::{borrow::Cow, convert::Infallible, fmt::Debug, future::Ready, ops::Deref};
+use std::{
+	borrow::Cow,
+	collections::HashMap,
+	convert::Infallible,
+	fmt::Debug,
+	future::Ready,
+	ops::Deref,
+	sync::Mutex,
+	time::{Duration, Instant},
+};
 
 use crate::{
 	auth::{AuthorizedAdmin, Fancy, PASSWORD_SESSION_KEY, USERNAME_SESSION_KEY},
@@ -1200,6 +1209,70 @@ pub struct Login {
 	password: String,
 }
 
+/// Per-IP failed-login bookkeeping. Each entry is (consecutive failure
+/// count, timestamp of the most recent failure). Cleared on a successful
+/// login from the same IP. Persists for the lifetime of the process;
+/// stale entries are pruned opportunistically on each check.
+static LOGIN_FAILURES: Mutex<Option<HashMap<String, (u32, Instant)>>> = Mutex::new(None);
+
+/// Window after which an IP's failure history is forgotten entirely.
+const LOGIN_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(15 * 60);
+/// Upper bound on the per-attempt backoff so a runaway failure count
+/// can't lock out a legitimately-misconfigured operator forever.
+const LOGIN_RATE_LIMIT_MAX_BACKOFF: Duration = Duration::from_secs(60);
+
+fn login_failure_map() -> std::sync::MutexGuard<'static, Option<HashMap<String, (u32, Instant)>>> {
+	let mut guard = LOGIN_FAILURES.lock().unwrap();
+	if guard.is_none() {
+		*guard = Some(HashMap::new());
+	}
+	guard
+}
+
+/// Returns the duration the caller must wait before another login
+/// attempt from `ip` will be accepted, or `None` if they may attempt
+/// immediately. Also opportunistically prunes entries older than
+/// `LOGIN_RATE_LIMIT_WINDOW`.
+fn login_rate_limit_check(ip: &str) -> Option<Duration> {
+	let mut guard = login_failure_map();
+	let map = guard.as_mut().unwrap();
+	map.retain(|_, (_, last)| last.elapsed() < LOGIN_RATE_LIMIT_WINDOW);
+	let (count, last) = map.get(ip)?;
+	let required = Duration::from_secs(1u64 << (*count).min(6))
+		.min(LOGIN_RATE_LIMIT_MAX_BACKOFF);
+	let elapsed = last.elapsed();
+	(elapsed < required).then(|| required - elapsed)
+}
+
+fn login_rate_limit_record_failure(ip: &str) {
+	let mut guard = login_failure_map();
+	let map = guard.as_mut().unwrap();
+	let entry = map.entry(ip.to_owned()).or_insert((0, Instant::now()));
+	entry.0 = entry.0.saturating_add(1);
+	entry.1 = Instant::now();
+}
+
+fn login_rate_limit_clear(ip: &str) {
+	let mut guard = login_failure_map();
+	guard.as_mut().unwrap().remove(ip);
+}
+
+/// Source the IP the rate limiter keys on. Mirrors the activity-log
+/// IP-trust policy from Activity::from_request: only consult Forwarded
+/// / X-Forwarded-For when the operator opted in via the new CLI flag.
+fn login_client_ip(req: &HttpRequest) -> String {
+	if ARGS.trust_forwarded_for {
+		req.connection_info()
+			.realip_remote_addr()
+			.unwrap_or("unknown")
+			.to_owned()
+	} else {
+		req.peer_addr()
+			.map(|addr| addr.ip().to_string())
+			.unwrap_or_else(|| "unknown".to_owned())
+	}
+}
+
 pub async fn post_login(
 	req: HttpRequest,
 	htmx: Htmx,
@@ -1207,6 +1280,18 @@ pub async fn post_login(
 	return_uri: LoginReturnUri,
 	session: Session,
 ) -> database::Result<HttpResponse> {
+	let ip = login_client_ip(&req);
+
+	if let Some(wait) = login_rate_limit_check(&ip) {
+		let retry = wait.as_secs().max(1);
+		return Ok(HttpResponse::TooManyRequests()
+			.insert_header(("Retry-After", retry.to_string()))
+			.body(html! {
+				h1 { "Too many login attempts" }
+				p { "Please wait " (retry) " seconds before trying again." }
+			}));
+	}
+
 	let authorized: bool = DATABASE.run(|conn| {
 		use crate::schema::users::dsl;
 		select(exists(
@@ -1217,6 +1302,7 @@ pub async fn post_login(
 		.get_result(conn)
 	})?;
 	if authorized {
+		login_rate_limit_clear(&ip);
 		session.insert(USERNAME_SESSION_KEY, &form.name).unwrap();
 		session
 			.insert(PASSWORD_SESSION_KEY, &form.password)
@@ -1231,6 +1317,7 @@ pub async fn post_login(
 				.map_into_boxed_body()
 		});
 	}
+	login_rate_limit_record_failure(&ip);
 	// Invalid credentials
 	Ok(if htmx.is_htmx {
 		HttpResponse::Ok().body(login_form(true, &return_uri))
