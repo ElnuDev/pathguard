@@ -98,7 +98,9 @@ pub const OVERRIDE_CSS: &str = "/pathguard_override.css";
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-	unsafe { env::set_var("RUST_LOG", "actix_web=debug,pathguard") };
+	if env::var("RUST_LOG").is_err() {
+		unsafe { env::set_var("RUST_LOG", "actix_web=info,pathguard=info") };
+	}
 	env_logger::init();
 	// If we construct this inside of HttpServer::new
 	// then it will instantiate multiple times leading to state divergence
