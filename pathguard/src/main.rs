@@ -104,6 +104,11 @@ pub const SCRIPT: &str = "/pathguard_script.js";
 pub const MISSING_CSS: &str = "/pathguard_missing.css";
 pub const OVERRIDE_CSS: &str = "/pathguard_override.css";
 
+/// Name of the cookie that carries pathguard's session. Referenced both
+/// by the session middleware setup and by the proxy handler (which strips
+/// this cookie out of forwarded requests before they reach the backend).
+pub const SESSION_COOKIE_NAME: &str = "pathguard_id";
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
 	if env::var("RUST_LOG").is_err() {
@@ -135,7 +140,7 @@ async fn main() -> std::io::Result<()> {
 			.wrap({
 				#[allow(unused_mut)]
 				let mut builder = SessionMiddleware::builder(CookieSessionStore::default(), key.clone())
-					.cookie_name("pathguard_id".to_owned());
+					.cookie_name(SESSION_COOKIE_NAME.to_owned());
 				#[cfg(debug_assertions)]
 				{
 					builder = builder.cookie_secure(false);
