@@ -681,6 +681,29 @@ pub async fn patch_user(
 		Err(err) => return Ok(ErrorBadRequest(err).error_response()),
 	};
 	let name = path.into_inner();
+
+	// Re-authenticate when the admin is rewriting their own password: a
+	// hijacked admin session would otherwise be enough to silently
+	// rotate the admin credential and lock the legitimate operator out.
+	if name == ADMIN_USERNAME {
+		let current_password = form
+			.iter()
+			.find(|(key, _)| key.as_str() == "current_password")
+			.map(|(_, value)| value.as_str())
+			.unwrap_or("");
+		let actual: Option<String> = DATABASE.run(|conn| {
+			use crate::schema::users::dsl;
+			dsl::users
+				.filter(dsl::name.eq(ADMIN_USERNAME))
+				.select(dsl::password)
+				.get_result::<String>(conn)
+				.optional()
+		})?;
+		if actual.as_deref() != Some(current_password) {
+			return Ok(ErrorForbidden("current password is incorrect").error_response());
+		}
+	}
+
 	validate_password(&password)?;
 	groups.insert(0, DEFAULT_GROUP.to_string());
 

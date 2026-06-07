@@ -194,6 +194,12 @@ impl UserWithGroups {
 							Some("bad float:right")
 						))
 						(icon_button(CHECK, "", Some("ok float:right")))
+						@if name == ADMIN_USERNAME {
+							div {
+								dt { "Current password:" }
+								dd { input type="password" name="current_password" placeholder="current password" required autocomplete="current-password"; }
+							}
+						}
 						div {
 							dt { "Password:" }
 							dd { input type="text" name="password" value=(password) placeholder="password" required; }
