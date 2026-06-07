@@ -27,7 +27,7 @@ function makeModal() {
 	const form = document.createElement("form");
 	form.method = "dialog";
 	modalOkButton = document.createElement("button");
-	modalOkButton.innerHTML = "Cancel";
+	modalOkButton.textContent = "Cancel";
 	modalOkButton.classList.add("float:right");
 	form.append(modalOkButton);
 	modal.appendChild(form);
@@ -61,9 +61,12 @@ document.addEventListener("DOMContentLoaded", _event => {
 			return;
 		}
 		makeModal();
-		modalTitleBar.innerHTML = `Error: ${event.detail.xhr.status} ${event.detail.xhr.statusText}`;
+		modalTitleBar.textContent = `Error: ${event.detail.xhr.status} ${event.detail.xhr.statusText}`;
 		modal.classList.toggle("bad", true);
-		modalMessageContainer.innerHTML = `<p>${event.detail.serverResponse || "Something went wrong."}</p>`;
+		modalMessageContainer.replaceChildren();
+		const errorParagraph = document.createElement("p");
+		errorParagraph.textContent = event.detail.serverResponse || "Something went wrong.";
+		modalMessageContainer.appendChild(errorParagraph);
 		modal.showModal();
 	});
 
@@ -75,13 +78,16 @@ document.addEventListener("DOMContentLoaded", _event => {
 			return;
 		}
 		makeModal();
-		modalTitleBar.innerHTML = "Confirmation";
+		modalTitleBar.textContent = "Confirmation";
 		modal.classList.toggle("bad", false);
-		modalMessageContainer.innerHTML = `<p>${event.detail.question}</p>`;
+		modalMessageContainer.replaceChildren();
+		const questionParagraph = document.createElement("p");
+		questionParagraph.textContent = event.detail.question;
+		modalMessageContainer.appendChild(questionParagraph);
 		const confirmButton = document.createElement("button");
 		confirmButton.classList.add("float:right");
 		confirmButton.style.marginLeft = "1ch";
-		confirmButton.innerHTML = "Confirm";
+		confirmButton.textContent = "Confirm";
 		confirmButton.onclick = () => {
 			modal.close();
 			event.detail.issueRequest(true);
