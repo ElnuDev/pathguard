@@ -114,7 +114,11 @@ async fn main() -> std::io::Result<()> {
 	HttpServer::new(move || {
 		let app = App::new()
 			.wrap(middleware::Logger::default())
-			.wrap(middleware::DefaultHeaders::new().add((CONTENT_TYPE, TEXT_HTML_UTF_8)))
+			.wrap(middleware::DefaultHeaders::new()
+				.add((CONTENT_TYPE, TEXT_HTML_UTF_8))
+				.add(("X-Frame-Options", "DENY"))
+				.add(("X-Content-Type-Options", "nosniff"))
+				.add(("Referrer-Policy", "no-referrer")))
 			.wrap({
 				#[allow(unused_mut)]
 				let mut builder = SessionMiddleware::builder(CookieSessionStore::default(), key.clone())
