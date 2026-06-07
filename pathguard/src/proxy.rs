@@ -23,6 +23,27 @@ impl ResponseError for ProxyError {
 	}
 }
 
+/// RFC 7230 §6.1 hop-by-hop header names. A standards-compliant proxy
+/// must not forward these from the client to the upstream, nor from
+/// the upstream back to the client -- they describe the single hop
+/// they were sent on. Forwarding them can break WebSocket upgrades,
+/// confuse keep-alive accounting, and (with a misbehaving backend)
+/// open request-smuggling attack surfaces.
+const HOP_BY_HOP: &[&str] = &[
+	"connection",
+	"keep-alive",
+	"proxy-authenticate",
+	"proxy-authorization",
+	"te",
+	"trailer",
+	"transfer-encoding",
+	"upgrade",
+];
+
+fn is_hop_by_hop(name: &str) -> bool {
+	HOP_BY_HOP.iter().any(|h| name.eq_ignore_ascii_case(h))
+}
+
 pub async fn proxy(
 	_auth: Fancy<Authorized>,
 	req: HttpRequest,
@@ -31,8 +52,11 @@ pub async fn proxy(
 ) -> Result<HttpResponse, FancyError<ProxyError>> {
 	// We want to pass redirect headers to the client, not follow them ourselves
 	let client = Client::builder().disable_redirects().finish();
-	let forwarded_req =
+	let mut forwarded_req =
 		client.request_from(format!("http://127.0.0.1:{port}{}", req.uri()), req.head());
+	for name in HOP_BY_HOP {
+		forwarded_req.headers_mut().remove(*name);
+	}
 	let res = forwarded_req
 		.send_body(body)
 		.await
@@ -40,6 +64,9 @@ pub async fn proxy(
 	let mut client_res = {
 		let mut builder = HttpResponse::build(res.status());
 		for (key, value) in res.headers() {
+			if is_hop_by_hop(key.as_str()) {
+				continue;
+			}
 			builder.insert_header((key, value));
 		}
 		builder
