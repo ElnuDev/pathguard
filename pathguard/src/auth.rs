@@ -179,13 +179,31 @@ pub fn user_rules(
 	}
 }
 
+/// True iff `path` is inside the URL subtree denoted by `prefix`.
+///
+/// "Inside" means component-level prefix match: the boundary between
+/// `prefix` and the rest of `path` must fall on a path separator (or
+/// at the end of `path`). Plain string starts_with would treat `/api`
+/// as a prefix of `/apis-internal`, which is the wrong answer for a
+/// path-routing rule.
+fn path_matches_prefix(prefix: &str, path: &str) -> bool {
+	if !path.starts_with(prefix) {
+		return false;
+	}
+	let rest = &path[prefix.len()..];
+	// If the rule already ends in a slash, any path starting with it is
+	// inside its subtree by definition. Otherwise, accept either an
+	// exact match or a continuation that starts at a path boundary.
+	prefix.ends_with('/') || rest.is_empty() || rest.starts_with('/')
+}
+
 pub fn user_rules_allowed(rules: &[Rule], path: &str) -> bool {
 	let path = urlencoding::decode(path).unwrap_or(Cow::Borrowed(path));
 	rules
 		.iter()
 		.filter_map(|rule| {
 			rule.allowed
-				.and_then(|allowed| path.starts_with(&rule.path).then_some(allowed))
+				.and_then(|allowed| path_matches_prefix(&rule.path, &path).then_some(allowed))
 		})
 		.next_back()
 		.unwrap_or_default()
